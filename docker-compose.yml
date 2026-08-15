@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgres:16
+    container_name: movie-booking-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-movie_booking}
+    ports:
+      - "5432:5432"
+    volumes:
+      # Lưu data ra ngoài container -> tắt/xóa container không mất data
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Cho phép các service khác (vd app) biết khi nào DB thực sự sẵn sàng
+      # nhận kết nối, không chỉ là container đã "chạy"
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: movie-booking-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # QUAN TRỌNG: bên trong mạng Docker, app không gọi database qua
+      # "localhost" (đó là localhost của chính container app, không phải DB).
+      # Phải dùng tên SERVICE ("db") làm hostname — Docker Compose tự tạo
+      # DNS nội bộ để "db" trỏ đúng tới container database.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-movie_booking}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy  # chờ DB thực sự sẵn sàng, không chỉ "đã chạy"
+    volumes:
+      # Mount code vào container -> sửa code trên máy thấy hiệu lực ngay
+      - ./app:/app/app
+    # Ghi đè CMD trong Dockerfile: thêm --reload để uvicorn tự khởi động lại
+    # mỗi khi phát hiện file .py thay đổi — bắt buộc phải có vì giờ đây
+    # Docker LÀ môi trường dev chính, không còn venv chạy song song để reload.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Tuỳ chọn: giao diện web để xem/quản lý database trực quan,
+  # đỡ phải gõ lệnh SQL thủ công lúc mới học. Bỏ comment nếu muốn dùng.
+  # pgadmin:
+  #   image: dpage/pgadmin4
+  #   container_name: movie-booking-pgadmin
+  #   restart: unless-stopped
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@admin.com
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   ports:
+  #     - "5050:80"
+  #   depends_on:
+  #     - db
+
+volumes:
+  postgres_data:
+
