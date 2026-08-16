@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Movie Booking - Trang chủ{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom: 24px;">Phim đang chiếu</h1>
+
+{% if movies %}
+<div class="movie-grid">
+    {% for movie in movies %}
+    <a href="/movie/{{ movie.id }}" class="movie-card">
+        {% if movie.poster_url %}
+        <img src="{{ movie.poster_url }}" alt="{{ movie.title }}">
+        {% else %}
+        <img src="https://via.placeholder.com/300x450?text=No+Poster" alt="{{ movie.title }}">
+        {% endif %}
+        <div class="movie-card-body">
+            <div class="movie-card-title">{{ movie.title }}</div>
+            <div class="movie-card-meta">{{ movie.genres }} · ⭐ {{ movie.rating }}</div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<p>Chưa có phim nào. Thử import từ TMDB qua <code>POST /movies/import-from-tmdb</code>.</p>
+{% endif %}
+{% endblock %}

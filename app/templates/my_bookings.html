@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Vé của tôi - Movie Booking{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom: 24px;">Vé của tôi</h1>
+
+<div id="booking-list" class="booking-list">
+    <p>Đang tải...</p>
+</div>
+
+<script>
+async function loadBookings() {
+    const resp = await fetch("/bookings/me");
+
+    if (resp.status === 401) {
+        window.location.href = "/login";
+        return;
+    }
+
+    const bookings = await resp.json();
+    const listEl = document.getElementById("booking-list");
+
+    if (bookings.length === 0) {
+        listEl.innerHTML = "<p>Bạn chưa đặt vé nào. <a href='/'>Xem phim đang chiếu</a>.</p>";
+        return;
+    }
+
+    listEl.innerHTML = bookings.map((b) => `
+        <div class="booking-item">
+            <div>
+                <strong>${b.movie_title}</strong><br>
+                <span style="color:#6b6b6b; font-size:0.9rem;">Ghế ${b.seat_label}</span>
+            </div>
+            <div style="color:#6b6b6b; font-size:0.85rem;">
+                Đặt lúc: ${new Date(b.booked_at).toLocaleString("vi-VN")}
+            </div>
+        </div>
+    `).join("");
+}
+
+loadBookings();
+</script>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Đăng nhập - Movie Booking{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom: 24px;">Đăng nhập</h1>
+
+<form class="auth-form" id="login-form">
+    <input type="email" id="email" placeholder="Email" required>
+    <input type="password" id="password" placeholder="Mật khẩu" required>
+    <button type="submit" class="btn">Đăng nhập</button>
+    <p id="message" class="error-msg"></p>
+</form>
+
+<p style="text-align:center; margin-top: 16px;">
+    Chưa có tài khoản? <a href="/register">Đăng ký</a>
+</p>
+<p style="text-align:center; margin-top: 8px;">
+    <a href="/forgot-password">Quên mật khẩu?</a>
+</p>
+
+<script>
+const form = document.getElementById("login-form");
+const messageEl = document.getElementById("message");
+
+form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    messageEl.textContent = "";
+
+    const email = document.getElementById("email").value;
+    const password = document.getElementById("password").value;
+
+    const resp = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+    });
+
+    if (resp.ok) {
+        window.location.href = "/";
+    } else {
+        const data = await resp.json();
+        messageEl.textContent = data.detail || "Đăng nhập thất bại.";
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Chọn ghế - {{ showtime.movie.title }}{% endblock %}
+
+{% block content %}
+<h1>{{ showtime.movie.title }}</h1>
+<p style="color: #6b6b6b; margin-bottom: 8px;">
+    {{ showtime.start_time.strftime("%d/%m/%Y %H:%M") }} · {{ "{:,.0f}".format(showtime.price) }}đ / ghế
+</p>
+
+<div class="seat-map" id="seat-map">
+    {% for row_label, seats in seats_by_row.items() %}
+    <div class="seat-row">
+        <span class="seat-row-label">{{ row_label }}</span>
+        {% for seat in seats %}
+        <button
+            class="seat"
+            data-seat-id="{{ seat.id }}"
+            data-status="{{ seat.status.value }}"
+            {% if seat.status.value != "available" %}disabled{% endif %}
+        >{{ seat.col_number }}</button>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+
+<div style="display: flex; align-items: center; gap: 16px; margin-top: 16px;">
+    <span style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
+        <span style="width:16px;height:16px;background:white;border:1px solid #e0e0e0;display:inline-block;"></span> Trống
+    </span>
+    <span style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
+        <span style="width:16px;height:16px;background:#e50914;display:inline-block;"></span> Đang chọn
+    </span>
+    <span style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
+        <span style="width:16px;height:16px;background:#6b6b6b;display:inline-block;"></span> Đã đặt
+    </span>
+</div>
+
+<button id="confirm-btn" class="btn" style="margin-top: 24px;" disabled>
+    Chọn 1 ghế để tiếp tục
+</button>
+<p id="message" class="error-msg"></p>
+
+<script>
+let selectedSeatId = null;
+let heldSeatId = null;  // ghế đang giữ trong Redis (qua API hold), để nhả nếu đổi ý
+
+const confirmBtn = document.getElementById("confirm-btn");
+const messageEl = document.getElementById("message");
+
+function showMessage(text, isError = true) {
+    messageEl.textContent = text;
+    messageEl.className = isError ? "error-msg" : "success-msg";
+}
+
+async function releaseHeldSeat() {
+    if (heldSeatId === null) return;
+    // fire-and-forget: không cần chờ kết quả, không chặn hành động tiếp theo
+    fetch(`/bookings/hold/${heldSeatId}`, { method: "DELETE" }).catch(() => {});
+    heldSeatId = null;
+}
+
+document.querySelectorAll(".seat[data-status='available']").forEach((seatEl) => {
+    seatEl.addEventListener("click", async () => {
+        const seatId = seatEl.dataset.seatId;
+
+        // Bỏ chọn ghế cũ (nếu có) trên giao diện + nhả khóa Redis của ghế đó
+        document.querySelectorAll(".seat.selected").forEach((el) => el.classList.remove("selected"));
+        await releaseHeldSeat();
+
+        // Gọi API giữ ghế (Lớp 1 - Redis, TTL 10 phút) trước khi cho phép xác nhận
+        const resp = await fetch(`/bookings/hold/${seatId}`, { method: "POST" });
+
+        if (resp.ok) {
+            seatEl.classList.add("selected");
+            selectedSeatId = seatId;
+            heldSeatId = seatId;
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = `Xác nhận đặt ghế ${seatEl.textContent}`;
+            showMessage("Đã giữ ghế trong 10 phút, hãy xác nhận để hoàn tất.", false);
+        } else {
+            const data = await resp.json();
+            showMessage(data.detail || "Không giữ được ghế này, thử ghế khác.");
+            seatEl.disabled = true;
+            seatEl.dataset.status = "booked";
+        }
+    });
+});
+
+confirmBtn.addEventListener("click", async () => {
+    if (!selectedSeatId) return;
+
+    const resp = await fetch("/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seat_id: parseInt(selectedSeatId) }),
+    });
+
+    if (resp.ok) {
+        window.location.href = "/my-bookings";
+    } else if (resp.status === 401) {
+        showMessage("Bạn cần đăng nhập trước khi đặt vé.");
+        setTimeout(() => (window.location.href = "/login"), 1500);
+    } else {
+        const data = await resp.json();
+        showMessage(data.detail || "Đặt vé thất bại, thử lại.");
+    }
+});
+</script>
+{% endblock %}

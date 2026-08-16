@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Movie Booking{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">🎬 Movie Booking</a>
+        <div class="navbar-links">
+            <a href="/">Phim</a>
+            <a href="/my-bookings">Vé của tôi</a>
+            <a href="/login">Đăng nhập</a>
+            <a href="/register">Đăng ký</a>
+        </div>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

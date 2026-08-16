@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Đăng ký - Movie Booking{% endblock %}
+
+{% block content %}
+<h1 style="text-align:center; margin-bottom: 24px;">Đăng ký tài khoản</h1>
+
+<form class="auth-form" id="register-form">
+    <input type="text" id="full_name" placeholder="Họ tên" required>
+    <input type="email" id="email" placeholder="Email" required>
+    <input type="password" id="password" placeholder="Mật khẩu" required minlength="6">
+    <button type="submit" class="btn">Đăng ký</button>
+    <p id="message" class="error-msg"></p>
+</form>
+
+<p style="text-align:center; margin-top: 16px;">
+    Đã có tài khoản? <a href="/login">Đăng nhập</a>
+</p>
+
+<script>
+const form = document.getElementById("register-form");
+const messageEl = document.getElementById("message");
+
+form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    messageEl.textContent = "";
+
+    const full_name = document.getElementById("full_name").value;
+    const email = document.getElementById("email").value;
+    const password = document.getElementById("password").value;
+
+    const resp = await fetch("/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ full_name, email, password }),
+    });
+
+    if (resp.ok) {
+        messageEl.className = "success-msg";
+        messageEl.textContent = "Đăng ký thành công! Đang chuyển sang trang đăng nhập...";
+        setTimeout(() => (window.location.href = "/login"), 1200);
+    } else {
+        const data = await resp.json();
+        messageEl.className = "error-msg";
+        messageEl.textContent = data.detail || "Đăng ký thất bại.";
+    }
+});
+</script>
+{% endblock %}
