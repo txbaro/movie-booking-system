@@ -16,5 +16,6 @@ class Movie(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer)
     rating: Mapped[float] = mapped_column(Float, default=0.0)
     poster_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tmdb_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True)
 
     showtimes: Mapped[list["Showtime"]] = relationship(back_populates="movie")

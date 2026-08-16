@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.core.database import Base, engine
-from app.routes import movies, showtimes
+from app.routes import auth, booking, movies, recommendations, showtimes
 
 # Import models package để đảm bảo tất cả model được đăng ký vào Base.metadata
 # TRƯỚC khi create_all chạy — nếu thiếu dòng này, bảng nào chưa được import
@@ -36,7 +36,10 @@ app = FastAPI(title="Movie Booking System", lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
+app.include_router(auth.router)
+app.include_router(booking.router)
 app.include_router(movies.router)
+app.include_router(recommendations.router)
 app.include_router(showtimes.router)
 
 

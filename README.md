@@ -5,18 +5,6 @@ và gợi ý phim dựa trên lịch sử mua (AI-powered).
 
 **Tech stack:** FastAPI · PostgreSQL · SQLAlchemy (async) · Jinja2
 
-## Trạng thái hiện tại (Task 1-2 hoàn thành)
-
-- [x] Cấu trúc project
-- [x] Database schema (users, movies, showtimes, seats, bookings)
-- [x] CRUD phim & suất chiếu (Task 3)
-- [ ] Đăng ký/đăng nhập (Task 4)
-- [ ] Luồng đặt vé cơ bản (Task 5)
-- [ ] Script test race condition (Task 6)
-- [ ] Xử lý conflict bằng locking (Task 7)
-- [ ] Recommendation (Task 8)
-- [ ] Giao diện (Task 9)
-
 ## Setup (Docker — không cần cài Python/venv trên máy)
 
 Toàn bộ project chạy trong Docker: PostgreSQL và FastAPI app đều là container,

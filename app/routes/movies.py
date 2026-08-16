@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.movie import Movie
 from app.schemas.movie import MovieCreate, MovieRead, MovieUpdate
+from app.services.tmdb import TMDBError, fetch_movies
 
 router = APIRouter(prefix="/movies", tags=["movies"])
 
@@ -76,3 +77,52 @@ async def delete_movie(movie_id: int, db: AsyncSession = Depends(get_db)):
 
     await db.delete(movie)
     await db.commit()
+
+@router.post("/import-from-tmdb", response_model=list[MovieRead])
+async def import_from_tmdb(
+    category: str = "popular",
+    page: int = 1,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Kéo dữ liệu phim thật từ TMDB về database — dùng để có data mẫu nhanh
+    thay vì gõ tay từng phim qua POST /movies.
+
+    category: "popular" | "now_playing" | "top_rated" | "upcoming"
+    page: TMDB trả 20 phim/trang, đổi page để lấy thêm phim khác.
+
+    Phim đã tồn tại (trùng tmdb_id) sẽ được BỎ QUA, không tạo trùng —
+    an toàn khi gọi lại API này nhiều lần.
+    """
+    if category not in {"popular", "now_playing", "top_rated", "upcoming"}:
+        raise HTTPException(
+            status_code=400,
+            detail="category phải là: popular, now_playing, top_rated, hoặc upcoming",
+        )
+
+    try:
+        tmdb_movies = await fetch_movies(category=category, page=page)
+    except TMDBError as e:
+        # 502 Bad Gateway: lỗi đến từ dịch vụ bên ngoài (TMDB), không phải
+        # lỗi của server mình — mã lỗi này phản ánh đúng bản chất vấn đề.
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # Lấy trước danh sách tmdb_id đã có trong DB để lọc phim trùng
+    # bằng 1 query duy nhất, thay vì query riêng cho từng phim (tránh N+1).
+    incoming_ids = [m["tmdb_id"] for m in tmdb_movies]
+    existing_result = await db.execute(
+        select(Movie.tmdb_id).where(Movie.tmdb_id.in_(incoming_ids))
+    )
+    existing_ids = {row[0] for row in existing_result.all()}
+
+    new_movies = [
+        Movie(**m) for m in tmdb_movies if m["tmdb_id"] not in existing_ids
+    ]
+
+    if new_movies:
+        db.add_all(new_movies)
+        await db.commit()
+        for m in new_movies:
+            await db.refresh(m)
+
+    return new_movies

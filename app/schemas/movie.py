@@ -31,6 +31,7 @@ class MovieUpdate(BaseModel):
 class MovieRead(MovieBase):
     """Dữ liệu trả về cho client — có thêm id so với lúc tạo."""
     id: int
+    tmdb_id: int | None = None
 
     # from_attributes=True: cho phép Pydantic đọc trực tiếp từ SQLAlchemy
     # model (object có attribute), không chỉ từ dict — cần thiết vì route
