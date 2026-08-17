@@ -97,3 +97,30 @@ async def fetch_movies(category: str = "popular", page: int = 1) -> list[dict]:
             })
 
         return movies
+
+async def get_trailer_key(tmdb_movie_id: int) -> str | None:
+    """
+    Lấy YouTube video key của trailer chính thức từ TMDB.
+    Trả về None nếu phim không có trailer, hoặc chưa cấu hình TMDB_API_KEY.
+
+    Chỉ trả về link YOUTUBE EMBED, không tải file video nào về server —
+    tôn trọng đúng điều khoản sử dụng của TMDB (không cho phép host lại
+    video, chỉ được embed qua YouTube).
+    """
+    if not settings.TMDB_API_KEY:
+        return None
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{TMDB_BASE_URL}/movie/{tmdb_movie_id}/videos",
+            params={"api_key": settings.TMDB_API_KEY, "language": "en-US"},
+        )
+        if resp.status_code != 200:
+            return None
+
+        results = resp.json().get("results", [])
+        trailers = [
+            v for v in results
+            if v.get("site") == "YouTube" and v.get("type") == "Trailer"
+        ]
+        return trailers[0]["key"] if trailers else None

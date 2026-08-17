@@ -16,6 +16,17 @@
     </div>
 </div>
 
+{% if trailer_key %}
+<h2 style="margin-top: 32px;">Trailer</h2>
+<div style="position: relative; padding-bottom: 42%; max-width: 640px; margin: 16px 0;">
+    <iframe
+        src="https://www.youtube.com/embed/{{ trailer_key }}"
+        style="position: absolute; top:0; left:0; width:100%; height:100%; border-radius:8px; border:none;"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowfullscreen>
+    </iframe>
+</div>
+{% endif %}
 <h2>Suất chiếu</h2>
 {% if showtimes %}
 <div class="showtime-list">

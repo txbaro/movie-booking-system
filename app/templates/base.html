@@ -12,13 +12,49 @@
         <div class="navbar-links">
             <a href="/">Phim</a>
             <a href="/my-bookings">Vé của tôi</a>
-            <a href="/login">Đăng nhập</a>
-            <a href="/register">Đăng ký</a>
+
+            <span id="guest-links">
+                <a href="/login">Đăng nhập</a>
+                <a href="/register">Đăng ký</a>
+            </span>
+
+            <span id="user-links" style="display:none;">
+                <span id="user-name" style="margin-left:24px; color:#ccc;"></span>
+                <a href="#" id="logout-link">Đăng xuất</a>
+            </span>
         </div>
     </nav>
 
     <main class="container">
         {% block content %}{% endblock %}
     </main>
+
+    <script>
+    // Chạy trên MỌI trang (nhờ đặt trong base.html) — kiểm tra trạng thái
+    // đăng nhập bằng cách gọi GET /auth/me. Cookie JWT tự động gửi kèm
+    // (same-origin), không cần code thêm gì để đính token.
+    (async function checkAuthStatus() {
+        try {
+            const resp = await fetch("/auth/me");
+            if (resp.ok) {
+                const user = await resp.json();
+                document.getElementById("guest-links").style.display = "none";
+                document.getElementById("user-links").style.display = "inline";
+                document.getElementById("user-name").textContent = user.full_name;
+            }
+            // Nếu resp không ok (401 - chưa đăng nhập): giữ nguyên trạng thái
+            // mặc định của HTML (guest-links đã hiện sẵn), không cần làm gì.
+        } catch (err) {
+            // Lỗi mạng/server: im lặng giữ trạng thái mặc định (guest),
+            // không chặn người dùng xem trang chỉ vì lỗi kiểm tra auth.
+        }
+    })();
+
+    document.getElementById("logout-link").addEventListener("click", async (e) => {
+        e.preventDefault();
+        await fetch("/auth/logout", { method: "POST" });
+        window.location.href = "/";
+    });
+    </script>
 </body>
 </html>

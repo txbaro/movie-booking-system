@@ -2,6 +2,12 @@
 {% block title %}Movie Booking - Trang chủ{% endblock %}
 
 {% block content %}
+<div id="recommendations-section" style="display:none; margin-bottom: 40px;">
+    <h1 style="margin-bottom: 4px;">Gợi ý cho bạn</h1>
+    <p style="color:#6b6b6b; margin-bottom: 20px;">Dựa trên các phim bạn đã đặt vé</p>
+    <div class="movie-grid" id="recommendations-grid"></div>
+</div>
+
 <h1 style="margin-bottom: 24px;">Phim đang chiếu</h1>
 
 {% if movies %}
@@ -23,4 +29,34 @@
 {% else %}
 <p>Chưa có phim nào. Thử import từ TMDB qua <code>POST /movies/import-from-tmdb</code>.</p>
 {% endif %}
+
+<script>
+// Chỉ hiện phần "Gợi ý cho bạn" nếu: (1) user đã đăng nhập, VÀ
+// (2) họ đã có ít nhất 1 booking để hệ thống có cơ sở gợi ý (nhớ lại
+// "cold-start problem" đã bàn ở Task 8 - user mới, chưa đặt vé nào,
+// GET /recommendations/me sẽ trả về mảng rỗng, không phải lỗi).
+(async function loadRecommendations() {
+    const resp = await fetch("/recommendations/me");
+    if (!resp.ok) return;  // 401 (chưa đăng nhập) -> im lặng bỏ qua
+
+    const recommendations = await resp.json();
+    if (recommendations.length === 0) return;  // chưa có lịch sử đặt vé
+
+    const section = document.getElementById("recommendations-section");
+    const grid = document.getElementById("recommendations-grid");
+
+    grid.innerHTML = recommendations.map((r) => `
+        <a href="/movie/${r.movie.id}" class="movie-card">
+            <img src="${r.movie.poster_url || 'https://via.placeholder.com/300x450?text=No+Poster'}"
+                 alt="${r.movie.title}">
+            <div class="movie-card-body">
+                <div class="movie-card-title">${r.movie.title}</div>
+                <div class="movie-card-meta">${r.movie.genres} · ⭐ ${r.movie.rating}</div>
+            </div>
+        </a>
+    `).join("");
+
+    section.style.display = "block";
+})();
+</script>
 {% endblock %}

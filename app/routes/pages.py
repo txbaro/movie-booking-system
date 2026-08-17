@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.templates import templates
 from app.models.movie import Movie
 from app.models.showtime import Showtime
+from app.services.tmdb import get_trailer_key
 
 router = APIRouter(tags=["pages"])
 
@@ -41,10 +42,17 @@ async def movie_detail_page(
     )
     showtimes = result.scalars().all()
 
+    # Chỉ phim được import từ TMDB (có tmdb_id) mới tra được trailer.
+    # Phim nhập tay qua POST /movies sẽ không có trailer -> trailer_key=None,
+    # template tự ẩn phần trailer nếu không có (xem movie_detail.html).
+    trailer_key = None
+    if movie.tmdb_id is not None:
+        trailer_key = await get_trailer_key(movie.tmdb_id)
+
     return templates.TemplateResponse(
         request=request,
         name="movie_detail.html",
-        context={"movie": movie, "showtimes": showtimes},
+        context={"movie": movie, "showtimes": showtimes, "trailer_key": trailer_key},
     )
 
 

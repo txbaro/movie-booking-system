@@ -1,131 +1,58 @@
-# Movie Booking System
+# 🎬 Movie Booking System
 
-Hệ thống đặt vé xem phim với xử lý conflict khi nhiều người cùng đặt 1 ghế,
-và gợi ý phim dựa trên lịch sử mua (AI-powered).
+Hệ thống đặt vé xem phim với cơ chế **chống double-booking 2 lớp** (Redis + PostgreSQL transaction locking) và **gợi ý phim cá nhân hóa** dựa trên lịch sử đặt vé.
 
-**Tech stack:** FastAPI · PostgreSQL · SQLAlchemy (async) · Jinja2
+🔗 **Demo trực tiếp:** [thêm link deploy ở đây]
 
-## Setup (Docker — không cần cài Python/venv trên máy)
+---
 
-Toàn bộ project chạy trong Docker: PostgreSQL và FastAPI app đều là container,
-tự nối mạng với nhau. Máy bạn chỉ cần cài Docker, không cần lo version Python.
+## Vấn đề dự án giải quyết
 
-### 1. Cấu hình biến môi trường
-```bash
-cp .env.example .env
-# Mở .env, đổi SECRET_KEY (tạo bằng lệnh dưới) — các biến POSTGRES_* để mặc định cũng được
-python -c "import secrets; print(secrets.token_hex(32))"
-```
+Khi nhiều người cùng cố đặt 1 ghế trong cùng 1 suất chiếu tại cùng thời điểm, hệ thống phải đảm bảo **chỉ đúng 1 người** đặt được ghế đó — không được để xảy ra tình trạng 2 người cùng "sở hữu" 1 ghế (double-booking), và người thua cuộc phải nhận được thông báo rõ ràng thay vì lỗi hệ thống mơ hồ.
 
-### 2. Dựng toàn bộ (build image lần đầu)
-```bash
-docker compose up --build
-```
-Lần đầu sẽ hơi lâu vì phải build image (cài hết package trong `requirements.txt`).
-Các lần sau chỉ cần `docker compose up` (không có `--build`) nếu không đổi
-`requirements.txt` hay `Dockerfile`.
+Đây là bài toán **race condition** kinh điển trong các hệ thống đặt chỗ thực tế (vé máy bay, vé concert, đặt phòng khách sạn).
 
-Mở http://localhost:8000/health — thấy `{"status": "ok"}` là thành công.
-Swagger docs tự động: http://localhost:8000/docs
+## Cách giải quyết — kiến trúc 2 lớp bảo vệ
 
-### 3. Chạy nền (không chiếm terminal)
-```bash
-docker compose up -d
-```
+**Lớp 1 — Redis (giữ ghế tạm thời, TTL 10 phút)**
+Khi user chọn ghế, hệ thống giành 1 khóa nguyên tử trong Redis (`SET ... NX`) — đảm bảo chỉ 1 request thành công dù nhiều request đến cùng lúc. Khóa tự động hết hạn nếu không thanh toán kịp, không cần job dọn dẹp thủ công.
 
-## Các lệnh dùng hằng ngày khi code
+**Lớp 2 — PostgreSQL `SELECT ... FOR UPDATE` (xác nhận cuối cùng)**
+Trước khi ghi booking thật vào database, dòng dữ liệu ghế được khóa độc quyền — loại bỏ hoàn toàn khoảng hở giữa "đọc trạng thái" và "ghi booking" từng gây ra bug double-booking.
 
-**Sửa code Python** — tự động reload, không cần làm gì thêm (nhờ `--reload` +
-volume mount trong `docker-compose.yml`). Chỉ cần lưu file, chờ vài giây,
-gọi lại API là thấy thay đổi.
+Kiến trúc này mô phỏng đúng cách các hệ thống đặt vé quy mô lớn (BookMyShow, Ticketmaster) xử lý bài toán tương tự: Redis lo tốc độ và trải nghiệm real-time, PostgreSQL đóng vai trò "nguồn sự thật" cuối cùng.
 
-**Thêm package mới vào `requirements.txt`** — phải build lại image:
-```bash
-docker compose up --build
-```
+**Đã kiểm chứng bằng script mô phỏng 20 request đồng thời tranh giành 1 ghế** — chỉ 1 request thành công, 19 request còn lại nhận lỗi rõ ràng (409), không có double-booking hay lỗi hệ thống nào xảy ra.
 
-**Xem log của app** (hữu ích khi debug lỗi):
-```bash
-docker compose logs -f app
-```
+## Các điểm kỹ thuật đáng chú ý khác
 
-**Vào bên trong container app** (giống SSH vào máy ảo, dùng khi cần chạy lệnh
-Python/pip thủ công, hoặc sau này chạy `alembic revision`):
-```bash
-docker compose exec app bash
-```
+- **Chống spam giữ ghế:** mỗi user chỉ được giữ tối đa 1 ghế tại 1 thời điểm, ràng buộc ở tầng server (không phụ thuộc hành vi phía client)
+- **Import dữ liệu thật từ TMDB:** phim, poster, mô tả, trailer YouTube — không dùng dữ liệu giả
+- **Gợi ý phim cá nhân hóa:** content-based filtering (TF-IDF + cosine similarity) dựa trên lịch sử đặt vé của từng user
+- **Xác thực an toàn:** JWT lưu trong HttpOnly cookie, mật khẩu hash bằng bcrypt, luồng quên/đặt lại mật khẩu qua email thật (SMTP)
+- **Toàn bộ hạ tầng chạy bằng Docker:** PostgreSQL, Redis, và ứng dụng — môi trường nhất quán, không phụ thuộc cấu hình máy cá nhân
 
-**Vào PostgreSQL bằng psql** (xem dữ liệu trực tiếp bằng SQL):
-```bash
-docker compose exec db psql -U postgres -d movie_booking
-```
+## Tech stack
 
-**Dừng toàn bộ** (data trong PostgreSQL vẫn giữ nguyên nhờ volume):
-```bash
-docker compose down
-```
-
-**Dừng và xóa luôn data** (dùng khi muốn reset database về trạng thái sạch):
-```bash
-docker compose down -v
-```
-
-**Kiểm tra container nào đang chạy:**
-```bash
-docker compose ps
-```
+| Thành phần | Công nghệ |
+|---|---|
+| Backend | FastAPI (async), SQLAlchemy (async ORM) |
+| Database | PostgreSQL |
+| Cache / tạm thời | Redis |
+| Frontend | Jinja2 (server-side rendering) |
+| Gợi ý phim | scikit-learn (TF-IDF, cosine similarity) |
+| Dữ liệu phim | TMDB API |
+| Hạ tầng | Docker, Docker Compose |
+| Xác thực | JWT (HttpOnly cookie), bcrypt |
 
 ## Cấu trúc project
 
-```
 app/
-├── main.py           # Entry point
-├── core/
-│   ├── config.py     # Đọc biến môi trường
-│   └── database.py   # Kết nối DB async + dependency get_db()
-├── models/           # SQLAlchemy models (5 bảng)
-├── schemas/          # Pydantic schemas (validate request/response) - sắp làm
-├── routes/           # API endpoints - sắp làm
-├── templates/        # Jinja2 HTML templates - sắp làm
-└── static/           # CSS/JS
-```
-
-## Ghi chú thiết kế quan trọng
-
-**Tạo bảng tự động lúc khởi động (tạm thời, chỉ dùng cho dev)**
-`app/main.py` hiện dùng `Base.metadata.create_all()` trong `lifespan` để tự
-tạo bảng khi app chạy — tiện để test API ngay, nhưng **không theo dõi được
-lịch sử thay đổi schema** và **không tự cập nhật bảng đã tồn tại** khi bạn
-sửa model. Alembic (thêm ở bước sau) sẽ thay thế cách này bằng migration
-đúng chuẩn.
-
-**API endpoints hiện có (Task 3)**
-```
-POST   /movies              Tạo phim mới
-GET    /movies              Danh sách phim (có phân trang + lọc theo genre)
-GET    /movies/{id}         Chi tiết 1 phim
-PATCH  /movies/{id}         Sửa thông tin phim
-DELETE /movies/{id}         Xóa phim
-
-POST   /showtimes           Tạo suất chiếu MỚI + TỰ ĐỘNG sinh toàn bộ ghế
-GET    /showtimes           Danh sách suất chiếu (lọc theo movie_id)
-GET    /showtimes/{id}      Chi tiết suất chiếu KÈM danh sách ghế
-DELETE /showtimes/{id}      Xóa suất chiếu (ghế liên quan tự động bị xóa theo)
-```
-Test trực tiếp qua Swagger UI: http://localhost:8000/docs
-
-**Vì sao tạo Showtime tự động sinh ghế luôn, không tách API riêng?**
-Tránh trường hợp dữ liệu không nhất quán: suất chiếu tồn tại nhưng thiếu ghế
-(vd do client quên gọi API tạo ghế, hoặc gọi giữa chừng bị lỗi mạng).
-
-**Vì sao mỗi Showtime có bộ ghế riêng?**
-Trạng thái "ghế đã đặt" chỉ có ý nghĩa trong phạm vi 1 suất chiếu. Ghế A5 của
-suất 19h có thể trống trong khi ghế A5 của suất 21h đã có người đặt.
-
-**2 lớp bảo vệ chống double-booking ở tầng database:**
-1. `UniqueConstraint(showtime_id, seat_label)` trên bảng `seats` — không cho phép
-   2 ghế trùng tên trong cùng suất chiếu
-2. `unique=True` trên `booking.seat_id` — 1 ghế chỉ gắn được với tối đa 1 booking
-
-Đây là "lưới an toàn cuối cùng" ở tầng DB. Logic xử lý concurrency chính (transaction
-locking) sẽ được implement ở Task 7, trong `app/routes/booking.py`.
+├── main.py # Entry point
+├── core/ # Config, kết nối DB/Redis, bảo mật
+├── models/ # SQLAlchemy models
+├── schemas/ # Pydantic schemas
+├── routes/ # API endpoints
+├── services/ # Logic nghiệp vụ (TMDB, recommendation, email)
+├── templates/ # Giao diện Jinja2
+└── static/ # CSS/JS
