@@ -2,9 +2,12 @@
 {% block title %}{{ movie.title }} - Movie Booking{% endblock %}
 
 {% block content %}
-<div class="movie-detail">
+<a href="/" class="back-link">← Quay lại danh sách phim</a>
+<div class="movie-detail movie-detail-hero">
     {% if movie.poster_url %}
     <img src="{{ movie.poster_url }}" alt="{{ movie.title }}">
+    {% else %}
+    <div class="detail-poster-placeholder">🎬</div>
     {% endif %}
     <div class="movie-detail-info">
         <h1>{{ movie.title }}</h1>
@@ -27,16 +30,67 @@
     </iframe>
 </div>
 {% endif %}
-<h2>Suất chiếu</h2>
-{% if showtimes %}
-<div class="showtime-list">
-    {% for st in showtimes %}
-    <a href="/showtime/{{ st.id }}/seats" class="showtime-btn">
-        {{ st.start_time.strftime("%d/%m/%Y %H:%M") }} — {{ "{:,.0f}".format(st.price) }}đ
-    </a>
+<section class="schedule-section">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">CHỌN THỜI GIAN</p>
+            <h2>Suất chiếu</h2>
+        </div>
+    </div>
+
+    <div class="date-tabs">
+        {% for day in date_options %}
+        <a href="/movie/{{ movie.id }}?date={{ day.isoformat() }}" class="date-tab {% if day == selected_date %}active{% endif %}">
+            <small>{{ 'Hôm nay' if loop.first else day.strftime('%a') }}</small>
+            <strong>{{ day.strftime('%d/%m') }}</strong>
+        </a>
+        {% endfor %}
+    </div>
+
+{% if showtime_groups %}
+<div class="cinema-groups">
+    {% for group in showtime_groups %}
+    <article class="cinema-group">
+        <header>
+            <div>
+                <span class="source-badge source-{{ group.cinema.source }}">{{ group.cinema.source or 'internal' }}</span>
+                <h3>{{ group.cinema.name }}</h3>
+                <p>{{ group.cinema.address }} · {{ group.cinema.city }}</p>
+            </div>
+        </header>
+        <div class="showtime-list">
+            {% for item in group.showtimes %}
+            {% set st = item.showtime %}
+            <a
+                href="{{ st.external_booking_url if st.booking_mode == 'external_redirect' else '/showtime/' ~ st.id ~ '/seats' }}"
+                class="showtime-btn {% if st.booking_mode == 'external_redirect' %}showtime-external{% endif %}"
+                {% if st.booking_mode == 'external_redirect' %}data-track-showtime-id="{{ st.id }}"{% endif %}
+                {% if st.booking_mode == 'external_redirect' %}target="_blank" rel="noopener noreferrer"{% endif %}
+            >
+                <strong>{{ st.start_time.strftime("%H:%M") }}</strong>
+                <span>
+                    {% if st.format %}{{ st.format }}{% endif %}
+                    {% if st.language %} · {{ st.language }}{% endif %}
+                </span>
+                <small>{% if st.price is not none %}{{ "{:,.0f}".format(st.price) }}đ{% else %}Xem giá tại rạp{% endif %}</small>
+                <em>{{ 'Mở trang rạp ↗' if st.booking_mode == 'external_redirect' else 'Chọn ghế' }}</em>
+            </a>
+            {% endfor %}
+        </div>
+    </article>
     {% endfor %}
 </div>
 {% else %}
-<p>Chưa có suất chiếu nào cho phim này.</p>
+<div class="empty-state compact">
+    <span>🗓️</span>
+    <h3>Chưa có suất chiếu trong ngày này</h3>
+    <p>Hãy thử một ngày khác trong tuần.</p>
+</div>
 {% endif %}
+</section>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    window.trackBehavior({event_type: "showtimes_viewed", movie_id: {{ movie.id }}});
+});
+</script>
 {% endblock %}

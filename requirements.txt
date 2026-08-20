@@ -17,3 +17,5 @@ httpx==0.28.1
 email-validator==2.2.0
 redis==5.2.1
 aiosmtplib==5.1.2
+pytest==8.4.2
+pytest-asyncio==1.2.0

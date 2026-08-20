@@ -29,7 +29,9 @@ async function loadBookings() {
         <div class="booking-item">
             <div>
                 <strong>${b.movie_title}</strong><br>
-                <span style="color:#6b6b6b; font-size:0.9rem;">Ghế ${b.seat_label}</span>
+                <span style="color:#6b6b6b; font-size:0.9rem;">
+                    Ghế ${b.seats.map((seat) => seat.seat_label).join(", ")}
+                </span>
             </div>
             <div style="color:#6b6b6b; font-size:0.85rem;">
                 Đặt lúc: ${new Date(b.booked_at).toLocaleString("vi-VN")}

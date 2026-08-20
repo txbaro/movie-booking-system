@@ -10,9 +10,16 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    ANTHROPIC_API_KEY: str = ""
     TMDB_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-2"
+    GEMINI_API_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
     REDIS_URL: str = "redis://localhost:6379/0"
+    AI_REQUESTS_PER_USER_PER_DAY: int = 20
+    AI_REQUESTS_PER_IP_PER_DAY: int = 100
+    AI_PROMPT_CACHE_TTL_SECONDS: int = 86400
+    COLLECTOR_LOCK_TTL_SECONDS: int = 3600
+    ENABLE_INTERNAL_BOOKING: bool = False
 
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

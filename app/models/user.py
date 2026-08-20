@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, func
+from sqlalchemy import DateTime, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -8,6 +8,7 @@ from app.core.database import Base
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -19,3 +20,6 @@ class User(Base):
 
     # Quan hệ 1-nhiều: 1 user có nhiều bookings
     bookings: Mapped[list["Booking"]] = relationship(back_populates="user")
+    events: Mapped[list["UserEvent"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )

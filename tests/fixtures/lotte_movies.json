@@ -1,0 +1,19 @@
+{
+  "Movies": {
+    "Items": [
+      {
+        "RepresentationMovieCode": "12203",
+        "MovieName": "NGHỈ HÈ SỢ NGHỈ HƯU",
+        "MovieNameUS": "ZERO MEETS HERO",
+        "PosterURL": "https://example.com/lotte-poster.jpg",
+        "PlayTime": "117",
+        "ViewEvaluation": 9.1,
+        "MovieGenreName": "Hài, Gia đình",
+        "TopReview": "Mô tả phim Lotte dùng cho parser test."
+      }
+    ],
+    "ItemCount": 1
+  },
+  "IsOK": "true",
+  "ResultMessage": "SUCCESS"
+}

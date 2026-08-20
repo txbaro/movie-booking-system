@@ -33,7 +33,7 @@ async def register_and_login(client: httpx.AsyncClient, email: str) -> bool:
     return resp.status_code == 200
 
 
-async def setup_test_data() -> int:
+async def setup_test_data() -> tuple[int, int]:
     """
     Tạo sẵn 1 phim + 1 suất chiếu test, trả về seat_id của ghế đầu tiên
     để dùng làm "mục tiêu" cho cuộc tấn công race condition.
@@ -51,13 +51,23 @@ async def setup_test_data() -> int:
         )
         movie_id = movie_resp.json()["id"]
 
+        cinema_resp = await client.post(
+            f"{BASE_URL}/cinemas",
+            json={"name": "Race Test Cinema", "address": "Test", "city": "Test"},
+        )
+        cinema_id = cinema_resp.json()["id"]
+        room_resp = await client.post(
+            f"{BASE_URL}/cinemas/{cinema_id}/rooms",
+            json={"name": "Race Room", "rows": 1, "cols": 1},
+        )
+        room_id = room_resp.json()["id"]
+
         showtime_resp = await client.post(
             f"{BASE_URL}/showtimes",
             json={
                 "movie_id": movie_id,
+                "room_id": room_id,
                 "start_time": "2026-12-31T19:00:00",
-                "room_rows": 1,
-                "room_cols": 1,  # CHỈ 1 GHẾ DUY NHẤT -> mọi request đều tranh
                 "price": "100000",
             },
         )
@@ -68,10 +78,12 @@ async def setup_test_data() -> int:
 
         print(f"✓ Đã tạo movie_id={movie_id}, showtime_id={showtime_id}, "
               f"seat_id={seat_id} (chỉ có 1 ghế duy nhất)")
-        return seat_id
+        return showtime_id, seat_id
 
 
-async def attack_seat(seat_id: int, user_index: int) -> tuple[int, int]:
+async def attack_seat(
+    showtime_id: int, seat_id: int, user_index: int
+) -> tuple[int, int]:
     """
     1 user cố đặt seat_id đó. Trả về (user_index, status_code) để
     biết chính xác user nào thành công/thất bại.
@@ -82,21 +94,27 @@ async def attack_seat(seat_id: int, user_index: int) -> tuple[int, int]:
         if not logged_in:
             return user_index, -1
 
-        resp = await client.post(f"{BASE_URL}/bookings", json={"seat_id": seat_id})
+        resp = await client.post(
+            f"{BASE_URL}/bookings",
+            json={"showtime_id": showtime_id, "seat_ids": [seat_id]},
+        )
         return user_index, resp.status_code
 
 
 async def main():
     print(f"=== Test race condition với {NUM_CONCURRENT_USERS} user đồng thời ===\n")
 
-    seat_id = await setup_test_data()
+    showtime_id, seat_id = await setup_test_data()
 
     print(f"\nBắn {NUM_CONCURRENT_USERS} request đặt CÙNG seat_id={seat_id} "
           f"GẦN NHƯ ĐỒNG THỜI...\n")
 
     # asyncio.gather chạy TẤT CẢ coroutine song song, không đợi lần lượt
     # -> đây là điểm mấu chốt để tạo ra race condition thật sự
-    tasks = [attack_seat(seat_id, i) for i in range(NUM_CONCURRENT_USERS)]
+    tasks = [
+        attack_seat(showtime_id, seat_id, i)
+        for i in range(NUM_CONCURRENT_USERS)
+    ]
     results = await asyncio.gather(*tasks)
 
     success_count = sum(1 for _, status in results if status == 201)

@@ -16,10 +16,22 @@ CƠ CHẾ TF-IDF + Cosine Similarity (giải thích ngắn gọn):
 """
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.movie import Movie
+from app.models.showtime import Showtime
+from app.services.discovery import utc_now
+
+
+EVENT_WEIGHTS = {
+    "movie_viewed": 1.0,
+    "movie_searched": 2.0,
+    "showtimes_viewed": 3.0,
+    "external_booking_clicked": 7.0,
+    "recommendation_clicked": 4.0,
+    "internal_booking_confirmed": 10.0,
+}
 
 
 async def _load_all_movies(db: AsyncSession) -> list[Movie]:
@@ -79,16 +91,16 @@ async def get_similar_movies(
 
 
 async def get_recommendations_for_user(
-    db: AsyncSession, watched_movie_ids: list[int], top_n: int = 5
+    db: AsyncSession,
+    movie_weights: dict[int, float],
+    top_n: int = 5,
 ) -> list[tuple[Movie, float]]:
     """
-    Gợi ý phim cho user dựa trên NHIỀU phim đã xem (lịch sử booking),
-    không chỉ 1 phim. Cách làm: gộp điểm tương đồng từ TỪNG phim đã xem,
-    cộng dồn lại — phim nào giống NHIỀU phim user từng xem sẽ được ưu tiên
-    cao hơn phim chỉ giống 1 phim duy nhất.
+    Tạo content profile có trọng số từ hành vi user rồi xếp hạng các phim còn
+    suất tương lai. Điểm trả về được chuẩn hóa về 0..1.
     """
-    if not watched_movie_ids:
-        return []
+    if not movie_weights:
+        return await get_trending_movies(db, top_n=top_n)
 
     movies = await _load_all_movies(db)
     if len(movies) < 2:
@@ -101,23 +113,63 @@ async def get_recommendations_for_user(
     tfidf_matrix = vectorizer.fit_transform(texts)
 
     combined_scores = [0.0] * len(movies)
-    valid_watched_indices = set()
+    seed_indices = set()
+    total_weight = 0.0
 
-    for watched_id in watched_movie_ids:
-        idx = id_to_index.get(watched_id)
+    for movie_id, weight in movie_weights.items():
+        idx = id_to_index.get(movie_id)
         if idx is None:
             continue
-        valid_watched_indices.add(idx)
+        seed_indices.add(idx)
+        total_weight += weight
         sims = cosine_similarity(tfidf_matrix[idx], tfidf_matrix).flatten()
         for i, score in enumerate(sims):
-            combined_scores[i] += score
+            combined_scores[i] += float(score) * weight
+
+    if not seed_indices or total_weight <= 0:
+        return await get_trending_movies(db, top_n=top_n)
+
+    available_movie_ids = set(
+        (
+            await db.scalars(
+                select(Showtime.movie_id)
+                .where(Showtime.start_time >= utc_now())
+                .distinct()
+            )
+        ).all()
+    )
 
     scored = [
-        (movies[i], combined_scores[i])
+        (movies[i], combined_scores[i] / total_weight)
         for i in range(len(movies))
-        # loại bỏ chính những phim user ĐÃ XEM rồi ra khỏi gợi ý
-        if i not in valid_watched_indices
+        if i not in seed_indices and movies[i].id in available_movie_ids
     ]
     scored.sort(key=lambda pair: pair[1], reverse=True)
+    if scored:
+        return scored[:top_n]
+    return await get_trending_movies(
+        db,
+        top_n=top_n,
+        excluded_movie_ids=set(movie_weights),
+    )
 
-    return scored[:top_n]
+
+async def get_trending_movies(
+    db: AsyncSession,
+    top_n: int = 5,
+    excluded_movie_ids: set[int] | None = None,
+) -> list[tuple[Movie, float]]:
+    """Cold-start fallback: phim có nhiều suất tương lai, sau đó ưu tiên rating."""
+    query = (
+        select(Movie, func.count(Showtime.id).label("showtime_count"))
+        .join(Showtime, Showtime.movie_id == Movie.id)
+        .where(Showtime.start_time >= utc_now())
+        .group_by(Movie.id)
+        .order_by(func.count(Showtime.id).desc(), Movie.rating.desc(), Movie.id)
+    )
+    if excluded_movie_ids:
+        query = query.where(Movie.id.not_in(excluded_movie_ids))
+    query = query.limit(top_n)
+    rows = (await db.execute(query)).all()
+    max_count = max((count for _movie, count in rows), default=1)
+    return [(movie, count / max_count) for movie, count in rows]

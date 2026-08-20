@@ -1,0 +1,12 @@
+{
+  "Items": {
+    "Items": [
+      {"PlayDate": "20260820", "IsPlayDate": "Y"},
+      {"PlayDate": "20260821", "IsPlayDate": "Y"},
+      {"PlayDate": "20260828", "IsPlayDate": "N"}
+    ],
+    "ItemCount": 2
+  },
+  "IsOK": "true",
+  "ResultMessage": "SUCCESS"
+}

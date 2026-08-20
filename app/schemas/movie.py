@@ -1,3 +1,6 @@
+from datetime import datetime
+from decimal import Decimal
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -32,8 +35,34 @@ class MovieRead(MovieBase):
     """Dữ liệu trả về cho client — có thêm id so với lúc tạo."""
     id: int
     tmdb_id: int | None = None
+    metadata_source: str | None = None
 
     # from_attributes=True: cho phép Pydantic đọc trực tiếp từ SQLAlchemy
     # model (object có attribute), không chỉ từ dict — cần thiết vì route
     # sẽ trả thẳng object Movie lấy từ database.
     model_config = ConfigDict(from_attributes=True)
+
+
+class MovieShowtimeRead(BaseModel):
+    id: int
+    room_id: int | None
+    room_name: str | None
+    start_time: datetime
+    price: Decimal | None
+    booking_mode: str
+    external_booking_url: str | None = None
+    format: str | None = None
+    language: str | None = None
+
+
+class CinemaShowtimes(BaseModel):
+    id: int
+    name: str
+    address: str
+    city: str
+    showtimes: list[MovieShowtimeRead]
+
+
+class MovieShowtimeAggregation(BaseModel):
+    movie: MovieRead
+    cinemas: list[CinemaShowtimes]

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ cinema.name }} - Movie Booking{% endblock %}
+
+{% block content %}
+<a href="/nearby-cinemas" class="back-link">← Quay lại danh sách rạp</a>
+<section class="cinema-detail-header">
+    <div>
+        <span class="source-badge source-{{ cinema.source }}">{{ cinema.source or 'internal' }}</span>
+        <h1>{{ cinema.name }}</h1>
+        <p>{{ cinema.address }} · {{ cinema.city }}</p>
+    </div>
+</section>
+
+<div class="date-tabs cinema-date-tabs">
+    {% for day in date_options %}
+    <a href="/cinema/{{ cinema.id }}?date={{ day.isoformat() }}" class="date-tab {% if day == selected_date %}active{% endif %}">
+        <small>{{ 'Hôm nay' if loop.first else day.strftime('%a') }}</small>
+        <strong>{{ day.strftime('%d/%m') }}</strong>
+    </a>
+    {% endfor %}
+</div>
+
+{% if movie_groups %}
+<div class="cinema-movie-list">
+    {% for group in movie_groups %}
+    <article class="cinema-movie-row">
+        <div class="cinema-movie-info">
+            <a href="/movie/{{ group.movie.id }}?date={{ selected_date.isoformat() }}" data-track-movie-id="{{ group.movie.id }}"><h2>{{ group.movie.title }}</h2></a>
+            <p>{{ group.movie.genres }} · {{ group.movie.duration_minutes }} phút</p>
+        </div>
+        <div class="showtime-list">
+            {% for item in group.showtimes %}
+            {% set st = item.showtime %}
+            <a
+                href="{{ st.external_booking_url if st.booking_mode == 'external_redirect' else '/showtime/' ~ st.id ~ '/seats' }}"
+                class="showtime-btn {% if st.booking_mode == 'external_redirect' %}showtime-external{% endif %}"
+                {% if st.booking_mode == 'external_redirect' %}data-track-showtime-id="{{ st.id }}"{% endif %}
+                {% if st.booking_mode == 'external_redirect' %}target="_blank" rel="noopener noreferrer"{% endif %}
+            >
+                <strong>{{ st.start_time.strftime('%H:%M') }}</strong>
+                <span>{{ st.format or 'Tiêu chuẩn' }}{% if st.language %} · {{ st.language }}{% endif %}</span>
+                <small>{% if st.price is not none %}{{ "{:,.0f}".format(st.price) }}đ{% else %}Xem giá tại rạp{% endif %}</small>
+                <em>{{ 'Mở trang rạp ↗' if st.booking_mode == 'external_redirect' else 'Chọn ghế' }}</em>
+            </a>
+            {% endfor %}
+        </div>
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state compact">
+    <span>🎞️</span>
+    <h3>Rạp chưa có suất chiếu trong ngày này</h3>
+    <p>Thử chọn một ngày khác.</p>
+</div>
+{% endif %}
+{% endblock %}

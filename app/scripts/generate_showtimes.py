@@ -5,9 +5,8 @@ An toàn khi chạy nhiều lần (idempotent): phim đã có ít nhất 1 suấ
 sẽ được BỎ QUA, không tạo thêm - tránh việc chạy lại script làm nhân đôi
 số suất chiếu mỗi lần.
 
-Mỗi phim được tạo 3 suất chiếu trong 2 ngày tới, khung giờ cố định
-(10:00, 15:00, 20:00), phòng 8 hàng x 10 cột (80 ghế), giá ngẫu nhiên
-trong khoảng 75.000đ - 120.000đ.
+Mỗi phim được tạo các suất chiếu trong 2 ngày tới bằng phòng/ghế vật lý
+đã có, giá ngẫu nhiên trong khoảng 75.000đ - 120.000đ.
 
 Chạy: docker compose exec app python app/scripts/generate_showtimes.py
 """
@@ -20,13 +19,12 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
 from app.models.movie import Movie
+from app.models.cinema_room import CinemaRoom
 from app.models.showtime import Showtime
-from app.routes.showtimes import _generate_seats  # tái dùng logic sinh ghế đã có
+from app.models.showtime_seat import ShowtimeSeat
 
 SHOWTIME_HOURS = [time(10, 0), time(15, 0), time(20, 0)]
 DAYS_AHEAD = [1, 2]  # tạo suất chiếu cho ngày mai và ngày kia
-ROOM_ROWS = 8
-ROOM_COLS = 10
 PRICE_RANGE = (75_000, 120_000)
 
 
@@ -37,21 +35,29 @@ async def main():
         # (tránh N+1 query, đã học nguyên tắc này từ Task 3).
         result = await db.execute(select(Movie).options(selectinload(Movie.showtimes)))
         movies = result.scalars().all()
+        room_result = await db.execute(
+            select(CinemaRoom).options(selectinload(CinemaRoom.seats))
+        )
+        rooms = [room for room in room_result.scalars().all() if room.seats]
 
         if not movies:
             print("Chưa có phim nào trong DB. Import phim trước (Task 3: TMDB import).")
+            return
+        if not rooms:
+            print("Chưa có phòng/ghế. Tạo CinemaRoom trước khi sinh suất chiếu.")
             return
 
         created_count = 0
         skipped_count = 0
 
-        for movie in movies:
+        for movie_index, movie in enumerate(movies):
             if movie.showtimes:
                 skipped_count += 1
                 continue
 
             for day_offset in DAYS_AHEAD:
                 for hour in SHOWTIME_HOURS:
+                    room = rooms[movie_index % len(rooms)]
                     show_date = datetime.now() + timedelta(days=day_offset)
                     start_time = datetime.combine(show_date.date(), hour)
                     price = random.randint(*PRICE_RANGE)
@@ -60,16 +66,20 @@ async def main():
 
                     showtime = Showtime(
                         movie_id=movie.id,
+                        cinema_id=room.cinema_id,
+                        room_id=room.id,
                         start_time=start_time,
-                        room_rows=ROOM_ROWS,
-                        room_cols=ROOM_COLS,
+                        room_rows=len({seat.row_label for seat in room.seats}),
+                        room_cols=max(seat.col_number for seat in room.seats),
                         price=price,
                     )
                     db.add(showtime)
                     await db.flush()  # lấy showtime.id trước khi sinh ghế
 
-                    seats = _generate_seats(showtime.id, ROOM_ROWS, ROOM_COLS)
-                    db.add_all(seats)
+                    db.add_all(
+                        ShowtimeSeat(showtime_id=showtime.id, seat_id=seat.id)
+                        for seat in room.seats
+                    )
 
             created_count += 1
             print(f"✓ Đã tạo {len(DAYS_AHEAD) * len(SHOWTIME_HOURS)} suất chiếu cho: {movie.title}")

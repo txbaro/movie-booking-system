@@ -5,12 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Movie Booking{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <script>
+    window.trackBehavior = function(payload) {
+        return fetch("/events", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload),
+            credentials: "same-origin",
+            keepalive: true,
+        }).catch(() => null);
+    };
+    </script>
 </head>
 <body>
     <nav class="navbar">
         <a href="/" class="navbar-brand">🎬 Movie Booking</a>
         <div class="navbar-links">
             <a href="/">Phim</a>
+            <a href="/nearby-cinemas">Rạp gần bạn</a>
             <a href="/my-bookings">Vé của tôi</a>
 
             <span id="guest-links">
@@ -55,6 +67,43 @@
         await fetch("/auth/logout", { method: "POST" });
         window.location.href = "/";
     });
+
+    document.addEventListener("click", (event) => {
+        const movieLink = event.target.closest("[data-track-movie-id]");
+        if (movieLink) {
+            window.trackBehavior({
+                event_type: "movie_viewed",
+                movie_id: Number(movieLink.dataset.trackMovieId),
+            });
+            if (movieLink.dataset.recommendationContext) {
+                window.trackBehavior({
+                    event_type: "recommendation_clicked",
+                    movie_id: Number(movieLink.dataset.trackMovieId),
+                    context_id: movieLink.dataset.recommendationContext,
+                });
+            }
+        }
+        const externalLink = event.target.closest("[data-track-showtime-id]");
+        if (externalLink) {
+            window.trackBehavior({
+                event_type: "external_booking_clicked",
+                showtime_id: Number(externalLink.dataset.trackShowtimeId),
+            });
+        }
+    });
+
+    const discoveryForm = document.getElementById("discovery-form");
+    if (discoveryForm) {
+        discoveryForm.addEventListener("submit", () => {
+            const searchQuery = discoveryForm.elements.title.value.trim();
+            if (searchQuery) {
+                window.trackBehavior({
+                    event_type: "movie_searched",
+                    search_query: searchQuery,
+                });
+            }
+        });
+    }
     </script>
 </body>
 </html>

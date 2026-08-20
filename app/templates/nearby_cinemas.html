@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Rạp gần bạn - Movie Booking{% endblock %}
+
+{% block content %}
+<section class="nearby-hero">
+    <div>
+        <p class="eyebrow">KHÁM PHÁ QUANH BẠN</p>
+        <h1>Tìm rạp gần nhất</h1>
+        <p>Vị trí chỉ được dùng trong trình duyệt để tính khoảng cách và không được lưu lại.</p>
+    </div>
+    <button id="locate-button" class="btn" type="button">⌖ Dùng vị trí của tôi</button>
+</section>
+
+<div class="nearby-controls">
+    <label class="filter-field">
+        <span>Bán kính</span>
+        <select id="radius-select">
+            <option value="5">5 km</option>
+            <option value="10" selected>10 km</option>
+            <option value="25">25 km</option>
+            <option value="50">50 km</option>
+        </select>
+    </label>
+    <span class="control-divider">hoặc</span>
+    <form id="city-form" class="city-search-form">
+        <label class="filter-field">
+            <span>Tìm không cần chia sẻ vị trí</span>
+            <input id="city-input" placeholder="Nhập thành phố, ví dụ Hồ Chí Minh">
+        </label>
+        <button class="btn btn-secondary" type="submit">Tìm theo thành phố</button>
+    </form>
+</div>
+
+<div id="nearby-status" class="nearby-status" role="status">
+    Chọn một cách tìm kiếm để xem các rạp có suất chiếu sắp tới.
+</div>
+<div id="nearby-results" class="nearby-grid"></div>
+
+<script>
+const statusBox = document.getElementById("nearby-status");
+const resultsBox = document.getElementById("nearby-results");
+const locateButton = document.getElementById("locate-button");
+const radiusSelect = document.getElementById("radius-select");
+
+function escapeHtml(value) {
+    const node = document.createElement("div");
+    node.textContent = value ?? "";
+    return node.innerHTML;
+}
+
+function providerClass(source) {
+    return ["cgv", "galaxy", "cinestar", "fixture"].includes(source)
+        ? `source-${source}` : "";
+}
+
+function renderCinemas(cinemas, usesLocation) {
+    if (cinemas.length === 0) {
+        resultsBox.innerHTML = `<div class="empty-state"><span>📍</span><h3>Không tìm thấy rạp</h3><p>Hãy tăng bán kính hoặc thử thành phố khác.</p></div>`;
+        statusBox.textContent = "Không có rạp phù hợp.";
+        return;
+    }
+    statusBox.textContent = `Tìm thấy ${cinemas.length} rạp có suất chiếu sắp tới.`;
+    resultsBox.innerHTML = cinemas.map((cinema, index) => `
+        <article class="nearby-card">
+            <div class="nearby-rank">${index + 1}</div>
+            <div class="nearby-card-content">
+                <span class="source-badge ${providerClass(cinema.source)}">${escapeHtml(cinema.source || "internal")}</span>
+                <h2>${escapeHtml(cinema.name)}</h2>
+                <p>${escapeHtml(cinema.address)}</p>
+                <p class="nearby-city">${escapeHtml(cinema.city)}</p>
+            </div>
+            <div class="nearby-card-action">
+                ${usesLocation && cinema.distance_km !== null
+                    ? `<strong>${cinema.distance_km.toFixed(2)} km</strong><small>đường chim bay</small>`
+                    : ""}
+                <a class="btn" href="/cinema/${cinema.id}">Xem suất chiếu</a>
+            </div>
+        </article>
+    `).join("");
+}
+
+async function loadCinemas(params, usesLocation) {
+    statusBox.textContent = "Đang tìm các rạp có suất chiếu...";
+    resultsBox.innerHTML = `<div class="loading-card">Đang tải dữ liệu</div>`;
+    params.set("has_upcoming_showtimes", "true");
+    params.set("limit", "100");
+    try {
+        const response = await fetch(`/cinemas?${params.toString()}`);
+        if (!response.ok) throw new Error("Không thể tải danh sách rạp");
+        renderCinemas(await response.json(), usesLocation);
+    } catch (error) {
+        resultsBox.innerHTML = "";
+        statusBox.textContent = `${error.message}. Vui lòng thử lại.`;
+        statusBox.classList.add("error-msg");
+    }
+}
+
+locateButton.addEventListener("click", () => {
+    if (!navigator.geolocation) {
+        statusBox.textContent = "Trình duyệt này không hỗ trợ lấy vị trí.";
+        return;
+    }
+    locateButton.disabled = true;
+    statusBox.classList.remove("error-msg");
+    statusBox.textContent = "Đang xin quyền truy cập vị trí...";
+    navigator.geolocation.getCurrentPosition(
+        ({coords}) => {
+            const params = new URLSearchParams({
+                latitude: coords.latitude.toString(),
+                longitude: coords.longitude.toString(),
+                radius_km: radiusSelect.value,
+            });
+            loadCinemas(params, true).finally(() => { locateButton.disabled = false; });
+        },
+        (error) => {
+            const messages = {
+                1: "Bạn đã từ chối chia sẻ vị trí. Có thể tìm theo thành phố bên dưới.",
+                2: "Không xác định được vị trí hiện tại.",
+                3: "Quá thời gian chờ vị trí.",
+            };
+            statusBox.textContent = messages[error.code] || "Không thể lấy vị trí.";
+            locateButton.disabled = false;
+        },
+        {enableHighAccuracy: false, timeout: 10000, maximumAge: 300000},
+    );
+});
+
+document.getElementById("city-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const city = document.getElementById("city-input").value.trim();
+    if (!city) {
+        statusBox.textContent = "Hãy nhập tên thành phố.";
+        return;
+    }
+    loadCinemas(new URLSearchParams({city}), false);
+});
+</script>
+{% endblock %}

@@ -6,19 +6,28 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ShowtimeCreate(BaseModel):
     movie_id: int
+    room_id: int
     start_time: datetime
-    room_rows: int = Field(default=5, ge=1, le=26)  # tối đa 26 vì dùng A-Z làm tên hàng
-    room_cols: int = Field(default=10, ge=1, le=50)
-    price: Decimal
+    price: Decimal = Field(gt=0)
 
 
 class ShowtimeRead(BaseModel):
     id: int
     movie_id: int
+    room_id: int | None
+    room_name: str | None
+    cinema_id: int
+    cinema_name: str
+    city: str
     start_time: datetime
-    room_rows: int
-    room_cols: int
-    price: Decimal
+    price: Decimal | None
+    booking_mode: str
+    external_booking_url: str | None = None
+    format: str | None = None
+    language: str | None = None
+    source: str | None = None
+    external_id: str | None = None
+    last_synced_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,4 +49,4 @@ class SeatRead(BaseModel):
 
 class ShowtimeWithSeats(ShowtimeRead):
     """Dùng cho trang chọn ghế — trả kèm luôn toàn bộ danh sách ghế."""
-    seats: list[SeatRead] = []
+    seats: list[SeatRead] = Field(default_factory=list)

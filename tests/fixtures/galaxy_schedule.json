@@ -1,0 +1,65 @@
+{
+  "props": {
+    "pageProps": {
+      "dataCinemas": {
+        "data": {
+          "result": [
+            {
+              "id": "cinema-1",
+              "name": "Galaxy Cinema Nguyễn Du",
+              "slug": "galaxy-nguyen-du",
+              "latitude": "10.773390",
+              "longitude": "106.693290",
+              "address": "116 Nguyễn Du, TP.HCM",
+              "cityId": "city-1"
+            }
+          ]
+        }
+      },
+      "cityFilter": [
+        {"id": "city-1", "name": "TP Hồ Chí Minh"}
+      ],
+      "dataMovie": {
+        "data": {
+          "result": [
+            {
+              "id": "movie-1",
+              "name": "Phim Galaxy",
+              "duration": 106,
+              "slug": "phim-galaxy",
+              "rate": 8.6,
+              "imagePortrait": "https://cdn.example/poster.jpg"
+            }
+          ]
+        }
+      },
+      "dataComming": {"data": {"result": []}},
+      "dataSessonAll": {
+        "data": {
+          "result": [
+            {
+              "id": "1001-257743",
+              "showDate": "2026-08-20",
+              "showTime": "14:15",
+              "screenName": "RAP 5",
+              "caption": "sub",
+              "version": "2d",
+              "movieFormat": "2D Phụ Đề",
+              "movie": {"id": "movie-1", "name": "Phim Galaxy", "duration": 106},
+              "cinema": {"id": "cinema-1", "name": "Galaxy Cinema Nguyễn Du", "cityId": "city-1"}
+            },
+            {
+              "id": "1001-257744",
+              "showDate": "2026-08-21",
+              "showTime": "09:00",
+              "caption": "dub",
+              "movieFormat": "2D Lồng Tiếng",
+              "movie": {"id": "movie-1", "name": "Phim Galaxy", "duration": 106},
+              "cinema": {"id": "cinema-1", "name": "Galaxy Cinema Nguyễn Du", "cityId": "city-1"}
+            }
+          ]
+        }
+      }
+    }
+  }
+}

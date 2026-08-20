@@ -4,49 +4,274 @@
 {% block content %}
 <div id="recommendations-section" style="display:none; margin-bottom: 40px;">
     <h1 style="margin-bottom: 4px;">Gợi ý cho bạn</h1>
-    <p style="color:#6b6b6b; margin-bottom: 20px;">Dựa trên các phim bạn đã đặt vé</p>
+    <p style="color:#6b6b6b; margin-bottom: 20px;">Dựa trên phim bạn xem, tìm kiếm và chọn đặt vé</p>
     <div class="movie-grid" id="recommendations-grid"></div>
 </div>
 
-<h1 style="margin-bottom: 24px;">Phim đang chiếu</h1>
+<section class="discovery-hero">
+    <p class="eyebrow">LỊCH CHIẾU HÔM NAY</p>
+    <h1>Tìm bộ phim bạn muốn xem</h1>
+    <p>Tìm phim và so sánh suất chiếu từ nhiều hệ thống rạp.</p>
+</section>
+
+<section class="semantic-recommender">
+    <div class="semantic-copy">
+        <p class="eyebrow">GỢI Ý BẰNG NGÔN NGỮ TỰ NHIÊN</p>
+        <h2>Hôm nay bạn muốn xem phim như thế nào?</h2>
+        <p>Mô tả tâm trạng, thể loại hoặc nội dung bạn thích. Hệ thống chỉ gợi ý phim còn suất chiếu.</p>
+    </div>
+    <form id="semantic-form" class="semantic-form">
+        <textarea name="prompt" minlength="10" maxlength="1000" required
+                  placeholder="Ví dụ: Tôi muốn xem phim nhẹ nhàng, hài hước, có yếu tố gia đình và không quá bạo lực..."></textarea>
+        <div class="semantic-location">
+            <button type="button" id="use-location" class="btn btn-secondary">📍 Dùng vị trí của tôi</button>
+            <label class="filter-field radius-field">
+                <span>Bán kính</span>
+                <select name="radius_km">
+                    <option value="5">5 km</option>
+                    <option value="10">10 km</option>
+                    <option value="20" selected>20 km</option>
+                    <option value="50">50 km</option>
+                </select>
+            </label>
+            <span id="location-status">Chưa sử dụng vị trí.</span>
+            <input type="hidden" name="latitude">
+            <input type="hidden" name="longitude">
+        </div>
+        <div class="semantic-options">
+            <label class="filter-field">
+                <span>Thành phố (tuỳ chọn)</span>
+                <input name="city" value="{{ city_query }}" placeholder="Hồ Chí Minh">
+            </label>
+            <label class="filter-field">
+                <span>Ngày xem</span>
+                <input type="date" name="date" value="{{ selected_date.isoformat() }}">
+            </label>
+            <button class="btn" type="submit">Gợi ý phim cho tôi</button>
+        </div>
+        <small>Mô tả được lưu cùng tài khoản để đo chất lượng gợi ý.</small>
+    </form>
+    <p id="semantic-status" class="semantic-status" aria-live="polite"></p>
+    <div id="semantic-results" class="movie-grid"></div>
+</section>
+
+<form class="discovery-filters" id="discovery-form" method="get" action="/">
+    <label class="filter-field filter-search">
+        <span>Tên phim</span>
+        <input name="title" value="{{ title_query }}" placeholder="Tìm theo tên phim...">
+    </label>
+    <label class="filter-field">
+        <span>Hệ thống rạp</span>
+        <select name="source">
+            <option value="">Tất cả</option>
+            <option value="cgv" {% if selected_source == 'cgv' %}selected{% endif %}>CGV</option>
+            <option value="galaxy" {% if selected_source == 'galaxy' %}selected{% endif %}>Galaxy</option>
+            <option value="lotte" {% if selected_source == 'lotte' %}selected{% endif %}>Lotte</option>
+            <option value="cinestar" {% if selected_source == 'cinestar' %}selected{% endif %}>Cinestar</option>
+            <option value="fixture" {% if selected_source == 'fixture' %}selected{% endif %}>Rạp nội bộ</option>
+        </select>
+    </label>
+    <label class="filter-field">
+        <span>Thành phố</span>
+        <input name="city" value="{{ city_query }}" placeholder="Hồ Chí Minh">
+    </label>
+    <label class="filter-field">
+        <span>Ngày xem</span>
+        <input type="date" name="date" value="{{ selected_date.isoformat() }}">
+    </label>
+    <button class="btn" type="submit">Tìm suất chiếu</button>
+</form>
+
+<div class="section-heading">
+    <div>
+        <p class="eyebrow">{{ selected_date.strftime('%d/%m/%Y') }}</p>
+        <h2>Phim có suất chiếu</h2>
+    </div>
+    {% if title_query or selected_source or city_query %}<a href="/?date={{ selected_date.isoformat() }}" class="text-link">Xóa bộ lọc</a>{% endif %}
+</div>
 
 {% if movies %}
 <div class="movie-grid">
     {% for movie in movies %}
-    <a href="/movie/{{ movie.id }}" class="movie-card">
+    <a href="/movie/{{ movie.id }}?date={{ selected_date.isoformat() }}" class="movie-card" data-track-movie-id="{{ movie.id }}">
         {% if movie.poster_url %}
         <img src="{{ movie.poster_url }}" alt="{{ movie.title }}">
         {% else %}
-        <img src="https://via.placeholder.com/300x450?text=No+Poster" alt="{{ movie.title }}">
+        <div class="poster-placeholder"><span>🎬</span><small>Chưa có poster</small></div>
         {% endif %}
         <div class="movie-card-body">
+            {% for provider_source in movie_sources.get(movie.id, []) %}
+            <span class="source-badge source-{{ provider_source }}">{{ provider_source }}</span>
+            {% endfor %}
             <div class="movie-card-title">{{ movie.title }}</div>
             <div class="movie-card-meta">{{ movie.genres }} · ⭐ {{ movie.rating }}</div>
+            <div class="movie-card-action">Xem lịch chiếu →</div>
         </div>
     </a>
     {% endfor %}
 </div>
 {% else %}
-<p>Chưa có phim nào. Thử import từ TMDB qua <code>POST /movies/import-from-tmdb</code>.</p>
+<div class="empty-state">
+    <span>🎞️</span>
+    <h3>Không tìm thấy suất chiếu</h3>
+    <p>Thử chọn ngày khác hoặc xóa bớt bộ lọc.</p>
+</div>
+{% endif %}
+
+{% if page > 1 or has_next %}
+<nav class="pagination" aria-label="Phân trang phim">
+    {% if page > 1 %}
+    <a class="btn btn-secondary" href="/?title={{ title_query|urlencode }}&source={{ selected_source }}&city={{ city_query|urlencode }}&date={{ selected_date.isoformat() }}&page={{ page - 1 }}">← Trang trước</a>
+    {% endif %}
+    <span>Trang {{ page }}</span>
+    {% if has_next %}
+    <a class="btn btn-secondary" href="/?title={{ title_query|urlencode }}&source={{ selected_source }}&city={{ city_query|urlencode }}&date={{ selected_date.isoformat() }}&page={{ page + 1 }}">Trang sau →</a>
+    {% endif %}
+</nav>
 {% endif %}
 
 <script>
-// Chỉ hiện phần "Gợi ý cho bạn" nếu: (1) user đã đăng nhập, VÀ
-// (2) họ đã có ít nhất 1 booking để hệ thống có cơ sở gợi ý (nhớ lại
-// "cold-start problem" đã bàn ở Task 8 - user mới, chưa đặt vé nào,
-// GET /recommendations/me sẽ trả về mảng rỗng, không phải lỗi).
+function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>'"]/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
+    })[char]);
+}
+
+document.getElementById("semantic-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    const status = document.getElementById("semantic-status");
+    const grid = document.getElementById("semantic-results");
+    button.disabled = true;
+    status.textContent = "Đang phân tích sở thích và các phim còn lịch chiếu...";
+    grid.innerHTML = "";
+    try {
+        const response = await fetch("/recommendations/natural-language", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                prompt: form.elements.prompt.value.trim(),
+                city: form.elements.city.value.trim() || null,
+                date: form.elements.date.value || null,
+                latitude: form.elements.latitude.value
+                    ? Number(form.elements.latitude.value) : null,
+                longitude: form.elements.longitude.value
+                    ? Number(form.elements.longitude.value) : null,
+                radius_km: Number(form.elements.radius_km.value),
+                limit: 5,
+            }),
+        });
+        if (response.status === 401) {
+            status.innerHTML = 'Hãy <a href="/login">đăng nhập</a> để nhận gợi ý cá nhân hóa.';
+            return;
+        }
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "Không thể tạo gợi ý");
+        if (payload.results.length === 0) {
+            status.textContent = "Không có phim phù hợp còn suất trong khu vực/ngày đã chọn.";
+            return;
+        }
+        const engineLabel = payload.engine === "gemini_embedding"
+            ? "Gemini embedding"
+            : "bộ máy cục bộ (chưa cấu hình Gemini API)";
+        const quotaLabel = payload.quota_remaining === null
+            ? ""
+            : ` Còn ${payload.quota_remaining} lượt gợi ý hôm nay.`;
+        status.textContent = `Tìm thấy ${payload.results.length} phim bằng ${engineLabel}.${quotaLabel}`;
+        const dateFormatter = new Intl.DateTimeFormat("vi-VN", {
+            weekday: "short", day: "2-digit", month: "2-digit",
+            hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh",
+        });
+        grid.innerHTML = payload.results.map((result) => {
+            const nearest = result.nearest_showtime;
+            const distance = nearest.distance_km === null
+                ? ""
+                : ` · ${nearest.distance_km.toFixed(1)} km`;
+            const externalTracking = nearest.booking_mode === "external_redirect"
+                ? `data-track-showtime-id="${nearest.id}" target="_blank" rel="noopener noreferrer"`
+                : "";
+            return `
+            <article class="movie-card semantic-card">
+                <a href="/movie/${result.movie.id}" class="semantic-poster-link"
+                   data-track-movie-id="${result.movie.id}"
+                   data-recommendation-context="${payload.context_id}">
+                ${result.movie.poster_url
+                    ? `<img src="${escapeHtml(result.movie.poster_url)}" alt="${escapeHtml(result.movie.title)}">`
+                    : '<div class="poster-placeholder"><span>🎬</span><small>Chưa có poster</small></div>'}
+                </a>
+                <div class="movie-card-body">
+                    <div class="semantic-score">${Math.round(result.final_score * 100)}% phù hợp</div>
+                    <div class="movie-card-title">${escapeHtml(result.movie.title)}</div>
+                    <div class="movie-card-meta">${escapeHtml(result.movie.genres)} · ⭐ ${result.movie.rating}</div>
+                    <div class="nearest-showtime">
+                        <strong>📍 ${escapeHtml(nearest.cinema_name)}${distance}</strong>
+                        <span>${dateFormatter.format(new Date(nearest.start_time))}</span>
+                        <small>${escapeHtml(nearest.cinema_address)}</small>
+                    </div>
+                    <p class="semantic-reason">${escapeHtml(result.reason)}</p>
+                    <a class="btn semantic-booking-link" href="${escapeHtml(nearest.booking_url)}"
+                       data-track-movie-id="${result.movie.id}"
+                       data-recommendation-context="${payload.context_id}"
+                       ${externalTracking}>Chọn suất gần nhất →</a>
+                </div>
+            </article>`;
+        }).join("");
+    } catch (error) {
+        status.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.getElementById("use-location").addEventListener("click", () => {
+    const form = document.getElementById("semantic-form");
+    const locationButton = document.getElementById("use-location");
+    const locationStatus = document.getElementById("location-status");
+    if (form.elements.latitude.value) {
+        form.elements.latitude.value = "";
+        form.elements.longitude.value = "";
+        locationButton.textContent = "📍 Dùng vị trí của tôi";
+        locationStatus.textContent = "Đã tắt sử dụng vị trí.";
+        return;
+    }
+    if (!navigator.geolocation) {
+        locationStatus.textContent = "Trình duyệt không hỗ trợ Geolocation.";
+        return;
+    }
+    locationButton.disabled = true;
+    locationStatus.textContent = "Đang xin quyền truy cập vị trí...";
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            form.elements.latitude.value = position.coords.latitude;
+            form.elements.longitude.value = position.coords.longitude;
+            locationButton.textContent = "✓ Đang dùng vị trí · Bấm để tắt";
+            locationButton.disabled = false;
+            locationStatus.textContent = `Độ chính xác khoảng ${Math.round(position.coords.accuracy)} m.`;
+        },
+        (error) => {
+            locationButton.disabled = false;
+            locationStatus.textContent = error.code === error.PERMISSION_DENIED
+                ? "Bạn đã từ chối quyền vị trí. Có thể tiếp tục lọc theo thành phố."
+                : "Không thể lấy vị trí hiện tại.";
+        },
+        {enableHighAccuracy: false, timeout: 10000, maximumAge: 300000},
+    );
+});
+
+// User có hành vi nhận gợi ý cá nhân hóa; user mới nhận fallback trending.
 (async function loadRecommendations() {
     const resp = await fetch("/recommendations/me");
     if (!resp.ok) return;  // 401 (chưa đăng nhập) -> im lặng bỏ qua
 
     const recommendations = await resp.json();
-    if (recommendations.length === 0) return;  // chưa có lịch sử đặt vé
+    if (recommendations.length === 0) return;
 
     const section = document.getElementById("recommendations-section");
     const grid = document.getElementById("recommendations-grid");
 
     grid.innerHTML = recommendations.map((r) => `
-        <a href="/movie/${r.movie.id}" class="movie-card">
+        <a href="/movie/${r.movie.id}" class="movie-card" data-track-movie-id="${r.movie.id}">
             <img src="${r.movie.poster_url || 'https://via.placeholder.com/300x450?text=No+Poster'}"
                  alt="${r.movie.title}">
             <div class="movie-card-body">

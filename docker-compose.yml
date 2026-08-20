@@ -34,7 +34,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-movie_booking}
       REDIS_URL: redis://redis:6379/0
     ports:
-      - "8000:8000"
+      - "8001:8000"
     depends_on:
       db:
         condition: service_healthy  # chờ DB thực sự sẵn sàng, không chỉ "đã chạy"
@@ -43,10 +43,14 @@ services:
     volumes:
       # Mount code vào container -> sửa code trên máy thấy hiệu lực ngay
       - ./app:/app/app
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini:ro
     # Ghi đè CMD trong Dockerfile: thêm --reload để uvicorn tự khởi động lại
     # mỗi khi phát hiện file .py thay đổi — bắt buộc phải có vì giờ đây
     # Docker LÀ môi trường dev chính, không còn venv chạy song song để reload.
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: >-
+      /bin/sh -c "alembic upgrade head &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   # Tuỳ chọn: giao diện web để xem/quản lý database trực quan,
   # đỡ phải gõ lệnh SQL thủ công lúc mới học. Bỏ comment nếu muốn dùng.
@@ -74,6 +78,53 @@ services:
       timeout: 3s
       retries: 5
 
+  # Hạ tầng test cô lập: không dùng volume và không publish port ra host.
+  test-db:
+    image: postgres:16
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: movie_booking_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d movie_booking_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  test-redis:
+    image: redis:7-alpine
+    profiles: ["test"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  test:
+    build: .
+    profiles: ["test"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@test-db:5432/movie_booking_test
+      REDIS_URL: redis://test-redis:6379/0
+      SECRET_KEY: test-only-secret-key
+      ENABLE_INTERNAL_BOOKING: "true"
+      PYTHONPATH: /app
+    depends_on:
+      test-db:
+        condition: service_healthy
+      test-redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./pytest.ini:/app/pytest.ini:ro
+    command: >-
+      /bin/sh -c "alembic upgrade head && pytest"
+
 volumes:
   postgres_data:
-

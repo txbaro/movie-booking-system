@@ -1,5 +1,6 @@
 """
-Kết nối Redis dùng cho tính năng "giữ ghế tạm thời".
+Kết nối Redis dùng cho AI quota/cache, collector lock, reset token và
+seat hold khi bật internal-booking demo.
 
 decode_responses=True: Redis mặc định trả về bytes (vd b"hello"), bật cờ này
 để tự động decode sang str — tiện hơn khi làm việc trong Python, không phải

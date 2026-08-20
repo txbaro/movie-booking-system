@@ -1,11 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.movie import Movie
-from app.schemas.movie import MovieCreate, MovieRead, MovieUpdate
+from app.models.cinema import Cinema
+from app.models.cinema_room import CinemaRoom
+from app.models.showtime import Showtime
+from app.schemas.movie import (
+    CinemaShowtimes,
+    MovieCreate,
+    MovieRead,
+    MovieShowtimeAggregation,
+    MovieShowtimeRead,
+    MovieUpdate,
+)
 from app.services.tmdb import TMDBError, fetch_movies
+from app.services.discovery import utc_now, vietnamese_date_range
 
 router = APIRouter(prefix="/movies", tags=["movies"])
 
@@ -22,9 +35,12 @@ async def create_movie(payload: MovieCreate, db: AsyncSession = Depends(get_db))
 
 @router.get("", response_model=list[MovieRead])
 async def list_movies(
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     genre: str | None = None,
+    title: str | None = None,
+    source: str | None = None,
+    available_only: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -36,7 +52,24 @@ async def list_movies(
         # ILIKE = so sánh không phân biệt hoa/thường, %...% để match "chứa"
         # thể loại đó trong chuỗi genres (vd "Action,Sci-Fi" match genre="action")
         query = query.where(Movie.genres.ilike(f"%{genre}%"))
-    query = query.offset(skip).limit(limit)
+    if title:
+        query = query.where(Movie.title.ilike(f"%{title}%"))
+    if source:
+        query = query.where(
+            select(Showtime.id)
+            .where(Showtime.movie_id == Movie.id, Showtime.source == source)
+            .exists()
+        )
+    if available_only:
+        query = query.where(
+            select(Showtime.id)
+            .where(
+                Showtime.movie_id == Movie.id,
+                Showtime.start_time >= utc_now(),
+            )
+            .exists()
+        )
+    query = query.order_by(Movie.title, Movie.id).offset(skip).limit(limit)
 
     result = await db.execute(query)
     return result.scalars().all()
@@ -48,6 +81,70 @@ async def get_movie(movie_id: int, db: AsyncSession = Depends(get_db)):
     if movie is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy phim")
     return movie
+
+
+@router.get("/{movie_id}/showtimes", response_model=MovieShowtimeAggregation)
+async def aggregate_movie_showtimes(
+    movie_id: int,
+    city: str | None = None,
+    source: str | None = None,
+    show_date: date | None = Query(default=None, alias="date"),
+    upcoming_only: bool = True,
+    db: AsyncSession = Depends(get_db),
+):
+    movie = await db.get(Movie, movie_id)
+    if movie is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phim")
+
+    query = (
+        select(Showtime, CinemaRoom, Cinema)
+        .outerjoin(CinemaRoom, Showtime.room_id == CinemaRoom.id)
+        .join(Cinema, Showtime.cinema_id == Cinema.id)
+        .where(Showtime.movie_id == movie_id)
+        .order_by(Cinema.name, Showtime.start_time)
+    )
+    if city:
+        query = query.where(Cinema.city.ilike(f"%{city}%"))
+    if source:
+        query = query.where(Showtime.source == source)
+    if show_date is not None:
+        start, end = vietnamese_date_range(show_date)
+        query = query.where(
+            Showtime.start_time >= start,
+            Showtime.start_time < end,
+        )
+    if upcoming_only:
+        query = query.where(Showtime.start_time >= utc_now())
+
+    grouped: dict[int, CinemaShowtimes] = {}
+    for showtime, room, cinema in (await db.execute(query)).all():
+        cinema_item = grouped.get(cinema.id)
+        if cinema_item is None:
+            cinema_item = CinemaShowtimes(
+                id=cinema.id,
+                name=cinema.name,
+                address=cinema.address,
+                city=cinema.city,
+                showtimes=[],
+            )
+            grouped[cinema.id] = cinema_item
+        cinema_item.showtimes.append(
+            MovieShowtimeRead(
+                id=showtime.id,
+                room_id=room.id if room else None,
+                room_name=room.name if room else None,
+                start_time=showtime.start_time,
+                price=showtime.price,
+                booking_mode=showtime.booking_mode,
+                external_booking_url=showtime.external_booking_url,
+                format=showtime.format,
+                language=showtime.language,
+            )
+        )
+    return MovieShowtimeAggregation(
+        movie=MovieRead.model_validate(movie),
+        cinemas=list(grouped.values()),
+    )
 
 
 @router.patch("/{movie_id}", response_model=MovieRead)

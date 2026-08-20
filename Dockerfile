@@ -41,10 +41,8 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Copy source code, cũng gán quyền sở hữu cho appuser
 COPY --chown=appuser:appuser ./app ./app
-# alembic/ và alembic.ini sẽ được thêm khi làm đến Task 3 (migration).
-# Uncomment 2 dòng dưới khi đã có các file đó:
-# COPY --chown=appuser:appuser ./alembic ./alembic
-# COPY --chown=appuser:appuser alembic.ini .
+COPY --chown=appuser:appuser ./alembic ./alembic
+COPY --chown=appuser:appuser alembic.ini .
 
 # Chạy bằng user không phải root — thực hành bảo mật cơ bản,
 # tránh chạy app với quyền root trong container
@@ -53,4 +51,3 @@ USER appuser
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-

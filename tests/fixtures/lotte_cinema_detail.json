@@ -1,0 +1,14 @@
+{
+  "CinemaDetail": {
+    "Address": "Tầng 7, Cantavil Premier, Thành phố Hồ Chí Minh",
+    "Province": "Ho Chi Minh City",
+    "DivisionCode": 1,
+    "DetailDivisionCode": "0001",
+    "CinemaID": 8009,
+    "CinemaName": "Cantavil",
+    "Latitude": "10.801439",
+    "Longitude": "106.746901"
+  },
+  "IsOK": "true",
+  "ResultMessage": "SUCCESS"
+}

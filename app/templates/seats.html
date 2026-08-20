@@ -1,109 +1,203 @@
 {% extends "base.html" %}
 {% block title %}Chọn ghế - {{ showtime.movie.title }}{% endblock %}
-
 {% block content %}
-<h1>{{ showtime.movie.title }}</h1>
-<p style="color: #6b6b6b; margin-bottom: 8px;">
-    {{ showtime.start_time.strftime("%d/%m/%Y %H:%M") }} · {{ "{:,.0f}".format(showtime.price) }}đ / ghế
-</p>
-
-<div class="seat-map" id="seat-map">
-    {% for row_label, seats in seats_by_row.items() %}
-    <div class="seat-row">
-        <span class="seat-row-label">{{ row_label }}</span>
-        {% for seat in seats %}
-        <button
-            class="seat"
-            data-seat-id="{{ seat.id }}"
-            data-status="{{ seat.status.value }}"
-            {% if seat.status.value != "available" %}disabled{% endif %}
-        >{{ seat.col_number }}</button>
-        {% endfor %}
+<a href="/movie/{{ showtime.movie_id }}" class="back-link">← Quay lại lịch chiếu</a>
+<div class="seat-page-header">
+    <div><p class="eyebrow">CHỌN GHẾ</p><h1>{{ showtime.movie.title }}</h1>
+        <p>{{ showtime.start_time.strftime("%d/%m/%Y %H:%M") }} · {{ "{:,.0f}".format(showtime.price) }}đ / ghế</p>
     </div>
+    <div id="connection-status" class="connection-status connecting">Đang kết nối realtime...</div>
+</div>
+<div class="screen-indicator"><span>MÀN HÌNH</span></div>
+<div class="seat-map" id="seat-map" data-showtime-id="{{ showtime.id }}">
+{% for row_label, seats in seats_by_row.items() %}
+    <div class="seat-row"><span class="seat-row-label">{{ row_label }}</span>
+    {% for seat in seats %}
+        <button class="seat" data-seat-id="{{ seat.id }}" data-seat-label="{{ seat.seat_label }}"
+                data-status="{{ seat.status }}" aria-label="Ghế {{ seat.seat_label }}"
+                {% if seat.status != "available" %}disabled{% endif %}>{{ seat.col_number }}</button>
     {% endfor %}
+    </div>
+{% endfor %}
 </div>
-
-<div style="display: flex; align-items: center; gap: 16px; margin-top: 16px;">
-    <span style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
-        <span style="width:16px;height:16px;background:white;border:1px solid #e0e0e0;display:inline-block;"></span> Trống
-    </span>
-    <span style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
-        <span style="width:16px;height:16px;background:#e50914;display:inline-block;"></span> Đang chọn
-    </span>
-    <span style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
-        <span style="width:16px;height:16px;background:#6b6b6b;display:inline-block;"></span> Đã đặt
-    </span>
+<div class="seat-legend">
+    <span><i class="legend-available"></i> Trống</span><span><i class="legend-selected"></i> Của bạn</span>
+    <span><i class="legend-held"></i> Đang giữ</span><span><i class="legend-booked"></i> Đã đặt</span>
 </div>
-
-<button id="confirm-btn" class="btn" style="margin-top: 24px;" disabled>
-    Chọn 1 ghế để tiếp tục
-</button>
-<p id="message" class="error-msg"></p>
+<aside class="booking-summary">
+    <div><small>Ghế đã chọn</small><strong id="selected-labels">Chưa chọn ghế</strong></div>
+    <div><small>Tạm tính</small><strong id="estimated-total">0đ</strong></div>
+    <div class="countdown-box"><small>Thời gian giữ ghế</small><strong id="countdown">--:--</strong></div>
+    <button id="confirm-btn" class="btn" disabled>Chọn ghế để tiếp tục</button>
+</aside>
+<div id="message" class="booking-message" role="alert"></div>
+<div id="reconnect-warning" class="reconnect-warning" hidden>Kết nối realtime bị gián đoạn. Hệ thống đang kết nối lại và sẽ đồng bộ sơ đồ ghế.</div>
 
 <script>
-let selectedSeatId = null;
-let heldSeatId = null;  // ghế đang giữ trong Redis (qua API hold), để nhả nếu đổi ý
-
+const showtimeId = document.getElementById("seat-map").dataset.showtimeId;
+const seatPrice = {{ showtime.price|int }};
+const maxSeats = 10;
+const selectedSeatIds = new Set();
+const holdDeadlines = new Map();
+let countdownInterval = null, socket = null, reconnectAttempts = 0, reconnectTimer = null, bookingPending = false;
 const confirmBtn = document.getElementById("confirm-btn");
 const messageEl = document.getElementById("message");
+const countdownEl = document.getElementById("countdown");
+const selectedLabelsEl = document.getElementById("selected-labels");
+const estimatedTotalEl = document.getElementById("estimated-total");
+const connectionStatusEl = document.getElementById("connection-status");
+const reconnectWarningEl = document.getElementById("reconnect-warning");
 
 function showMessage(text, isError = true) {
     messageEl.textContent = text;
-    messageEl.className = isError ? "error-msg" : "success-msg";
+    messageEl.className = `booking-message ${isError ? "error-msg" : "success-msg"}`;
 }
-
-async function releaseHeldSeat() {
-    if (heldSeatId === null) return;
-    // fire-and-forget: không cần chờ kết quả, không chặn hành động tiếp theo
-    fetch(`/bookings/hold/${heldSeatId}`, { method: "DELETE" }).catch(() => {});
-    heldSeatId = null;
+function findSeatEl(seatId) { return document.querySelector(`.seat[data-seat-id="${seatId}"]`); }
+function stopCountdown() {
+    if (countdownInterval) clearInterval(countdownInterval);
+    countdownInterval = null; countdownEl.textContent = "--:--";
 }
-
-document.querySelectorAll(".seat[data-status='available']").forEach((seatEl) => {
-    seatEl.addEventListener("click", async () => {
-        const seatId = seatEl.dataset.seatId;
-
-        // Bỏ chọn ghế cũ (nếu có) trên giao diện + nhả khóa Redis của ghế đó
-        document.querySelectorAll(".seat.selected").forEach((el) => el.classList.remove("selected"));
-        await releaseHeldSeat();
-
-        // Gọi API giữ ghế (Lớp 1 - Redis, TTL 10 phút) trước khi cho phép xác nhận
-        const resp = await fetch(`/bookings/hold/${seatId}`, { method: "POST" });
-
-        if (resp.ok) {
-            seatEl.classList.add("selected");
-            selectedSeatId = seatId;
-            heldSeatId = seatId;
-            confirmBtn.disabled = false;
-            confirmBtn.textContent = `Xác nhận đặt ghế ${seatEl.textContent}`;
-            showMessage("Đã giữ ghế trong 10 phút, hãy xác nhận để hoàn tất.", false);
-        } else {
-            const data = await resp.json();
-            showMessage(data.detail || "Không giữ được ghế này, thử ghế khác.");
-            seatEl.disabled = true;
-            seatEl.dataset.status = "booked";
+function startCountdown() {
+    if (countdownInterval) return;
+    function tick() {
+        if (!holdDeadlines.size) { stopCountdown(); return; }
+        const remaining = Math.max(0, Math.ceil((Math.min(...holdDeadlines.values()) - Date.now()) / 1000));
+        countdownEl.textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`;
+        if (remaining <= 0) {
+            stopCountdown(); showMessage("Đã hết thời gian giữ ghế, sơ đồ đang được đồng bộ lại."); refreshSeatMap();
         }
-    });
-});
+    }
+    tick(); countdownInterval = setInterval(tick, 1000);
+}
+function updateBookingSummary() {
+    const labels = Array.from(selectedSeatIds).map(id => findSeatEl(id)?.dataset.seatLabel).filter(Boolean).sort();
+    selectedLabelsEl.textContent = labels.length ? labels.join(", ") : "Chưa chọn ghế";
+    estimatedTotalEl.textContent = new Intl.NumberFormat("vi-VN").format(selectedSeatIds.size * seatPrice) + "đ";
+    confirmBtn.disabled = !selectedSeatIds.size || bookingPending;
+    confirmBtn.textContent = selectedSeatIds.size ? `Xác nhận đặt ${selectedSeatIds.size} ghế` : "Chọn ghế để tiếp tục";
+}
+async function releaseHeldSeat(seatId) {
+    try { await fetch(`/bookings/hold/${showtimeId}/${seatId}`, {method: "DELETE"}); }
+    catch (_error) { showMessage("Không thể nhả ghế do mất kết nối. Ghế sẽ tự hết hạn."); }
+}
+async function refreshSeatMap() {
+    try {
+        const [response, holdsResponse] = await Promise.all([
+            fetch(`/showtimes/${showtimeId}`),
+            fetch(`/bookings/holds/${showtimeId}`),
+        ]);
+        if (!response.ok) return;
+        const data = await response.json();
+        const myHolds = holdsResponse.ok ? await holdsResponse.json() : [];
+        const ownedIds = new Set(myHolds.map(hold => String(hold.seat_id)));
+        const ownedTtls = new Map(myHolds.map(hold => [String(hold.seat_id), hold.expires_in_seconds]));
+        const statuses = new Map(data.seats.map(seat => [String(seat.id), seat.status]));
+        document.querySelectorAll(".seat").forEach(seatEl => {
+            const id = seatEl.dataset.seatId, status = statuses.get(id);
+            if (!status) return;
+            if (ownedIds.has(id)) {
+                selectedSeatIds.add(id); seatEl.dataset.status = "held";
+                holdDeadlines.set(id, Date.now() + ownedTtls.get(id) * 1000);
+                seatEl.disabled = false; seatEl.classList.add("selected"); return;
+            }
+            selectedSeatIds.delete(id); holdDeadlines.delete(id);
+            seatEl.dataset.status = status; seatEl.disabled = status !== "available";
+            seatEl.classList.remove("selected");
+        });
+        updateBookingSummary();
+        if (selectedSeatIds.size) startCountdown(); else stopCountdown();
+    } catch (_error) { showMessage("Chưa thể đồng bộ lại sơ đồ ghế."); }
+}
+async function handleSeatClick(seatEl) {
+    if (bookingPending) return;
+    const seatId = seatEl.dataset.seatId;
+    if (selectedSeatIds.has(seatId)) {
+        seatEl.disabled = true; await releaseHeldSeat(seatId);
+        selectedSeatIds.delete(seatId); holdDeadlines.delete(seatId);
+        seatEl.classList.remove("selected"); seatEl.dataset.status = "available"; seatEl.disabled = false;
+        updateBookingSummary(); if (!selectedSeatIds.size) stopCountdown(); return;
+    }
+    if (selectedSeatIds.size >= maxSeats) { showMessage(`Bạn chỉ được chọn tối đa ${maxSeats} ghế.`); return; }
+    seatEl.disabled = true;
+    let response;
+    try { response = await fetch(`/bookings/hold/${showtimeId}/${seatId}`, {method: "POST"}); }
+    catch (_error) { seatEl.disabled = false; showMessage("Mất kết nối, chưa thể giữ ghế này."); return; }
+    if (response.ok) {
+        const data = await response.json(); selectedSeatIds.add(seatId);
+        holdDeadlines.set(seatId, Date.now() + data.hold_expires_in_seconds * 1000);
+        seatEl.dataset.status = "held"; seatEl.disabled = false; seatEl.classList.add("selected");
+        updateBookingSummary(); startCountdown(); showMessage("Đã giữ ghế, hãy xác nhận trước khi hết giờ.", false);
+    } else if (response.status === 401) {
+        showMessage("Bạn cần đăng nhập trước khi giữ ghế."); setTimeout(() => location.href = "/login", 1200);
+    } else {
+        const data = await response.json(); showMessage(data.detail || "Không giữ được ghế này."); await refreshSeatMap();
+    }
+}
+document.querySelectorAll(".seat").forEach(el => el.addEventListener("click", () => handleSeatClick(el)));
 
 confirmBtn.addEventListener("click", async () => {
-    if (!selectedSeatId) return;
-
-    const resp = await fetch("/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seat_id: parseInt(selectedSeatId) }),
-    });
-
-    if (resp.ok) {
-        window.location.href = "/my-bookings";
-    } else if (resp.status === 401) {
-        showMessage("Bạn cần đăng nhập trước khi đặt vé.");
-        setTimeout(() => (window.location.href = "/login"), 1500);
+    if (!selectedSeatIds.size || bookingPending) return;
+    bookingPending = true; updateBookingSummary(); confirmBtn.textContent = "Đang xác nhận...";
+    let response;
+    try {
+        response = await fetch("/bookings", {method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({showtime_id: Number(showtimeId), seat_ids: Array.from(selectedSeatIds, Number)})});
+    } catch (_error) {
+        bookingPending = false; updateBookingSummary();
+        showMessage("Mất kết nối khi xác nhận. Hãy kiểm tra Vé của tôi trước khi thử lại."); return;
+    }
+    if (response.ok) { stopCountdown(); location.href = "/my-bookings"; }
+    else if (response.status === 401) {
+        bookingPending = false; showMessage("Bạn cần đăng nhập trước khi đặt vé."); setTimeout(() => location.href = "/login", 1200);
     } else {
-        const data = await resp.json();
-        showMessage(data.detail || "Đặt vé thất bại, thử lại.");
+        const data = await response.json(); bookingPending = false; updateBookingSummary();
+        showMessage(data.detail || "Đặt vé thất bại, thử lại."); if (response.status === 409) await refreshSeatMap();
     }
 });
+
+function applySeatUpdate(data) {
+    if (data.type !== "seat_update") return;
+    const id = String(data.seat_id); if (selectedSeatIds.has(id) && data.status === "held") return;
+    const el = findSeatEl(id); if (!el) return;
+    if (data.status === "available") {
+        el.dataset.status = "available"; el.disabled = false; el.classList.remove("selected");
+        selectedSeatIds.delete(id); holdDeadlines.delete(id);
+    } else if (data.status === "held") { el.dataset.status = "held"; el.disabled = true; }
+    else if (data.status === "booked") {
+        el.dataset.status = "booked"; el.disabled = true; el.classList.remove("selected");
+        selectedSeatIds.delete(id); holdDeadlines.delete(id);
+    }
+    updateBookingSummary(); if (!selectedSeatIds.size) stopCountdown();
+}
+async function restoreMyHolds() {
+    try {
+        const response = await fetch(`/bookings/holds/${showtimeId}`); if (!response.ok) return;
+        const holds = await response.json();
+        holds.forEach(hold => {
+            const id = String(hold.seat_id), el = findSeatEl(id); if (!el) return;
+            selectedSeatIds.add(id); holdDeadlines.set(id, Date.now() + hold.expires_in_seconds * 1000);
+            el.dataset.status = "held"; el.disabled = false; el.classList.add("selected");
+        });
+        if (holds.length) { updateBookingSummary(); startCountdown(); showMessage("Đã khôi phục các ghế bạn đang giữ.", false); }
+    } catch (_error) { /* Guest vẫn có thể xem sơ đồ. */ }
+}
+function connectWebSocket() {
+    clearTimeout(reconnectTimer);
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(`${protocol}//${location.host}/ws/showtime/${showtimeId}`);
+    connectionStatusEl.textContent = reconnectAttempts ? "Đang kết nối lại..." : "Đang kết nối realtime...";
+    connectionStatusEl.className = "connection-status connecting";
+    socket.addEventListener("open", async () => {
+        reconnectAttempts = 0; connectionStatusEl.textContent = "Realtime đang hoạt động";
+        connectionStatusEl.className = "connection-status online"; reconnectWarningEl.hidden = true; await refreshSeatMap();
+    });
+    socket.addEventListener("message", event => { try { applySeatUpdate(JSON.parse(event.data)); } catch (_error) {} });
+    socket.addEventListener("close", () => {
+        connectionStatusEl.textContent = "Mất kết nối realtime"; connectionStatusEl.className = "connection-status offline";
+        reconnectWarningEl.hidden = false;
+        reconnectTimer = setTimeout(connectWebSocket, Math.min(1000 * (2 ** reconnectAttempts++), 15000));
+    });
+}
+restoreMyHolds(); connectWebSocket();
 </script>
 {% endblock %}

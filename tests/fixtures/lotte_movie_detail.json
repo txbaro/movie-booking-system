@@ -1,0 +1,14 @@
+{
+  "Movie": {
+    "RepresentationMovieCode": "12203",
+    "MovieName": "NGHỈ HÈ SỢ NGHỈ HƯU",
+    "MovieNameUS": "ZERO MEETS HERO",
+    "PosterURL": "https://example.com/lotte-detail-poster.jpg",
+    "PlayTime": 117,
+    "ViewEvaluation": 9.8,
+    "MovieGenreName": "Comedy",
+    "Synopsis": "Nội dung phim chính xác từ GetMovieDetail."
+  },
+  "IsOK": "true",
+  "ResultMessage": "SUCCESS"
+}

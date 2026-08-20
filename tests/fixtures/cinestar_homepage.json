@@ -1,0 +1,20 @@
+{
+  "props": {
+    "pageProps": {
+      "res": {
+        "listMovie": [
+          {"id": "movie-1", "name_vn": "Phim Cinestar Test"}
+        ],
+        "listCinemas": [
+          {
+            "id": "cinema-1",
+            "name_vn": "Cinestar Test",
+            "address": "1 Đường Test",
+            "area_name_vn": "Hồ Chí Minh",
+            "maps": "10.7769, 106.7009"
+          }
+        ]
+      }
+    }
+  }
+}
