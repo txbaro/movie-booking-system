@@ -1,271 +1,232 @@
-# 🎬 Movie Booking System
+# Movie Discovery & Recommendation Platform
 
-Hệ thống tổng hợp lịch chiếu nhiều rạp, có cơ chế **chống
-double-booking 2 lớp** (Redis + PostgreSQL transaction locking) cho inventory
-nội bộ ở chế độ technical demo và **gợi ý phim cá nhân hóa** từ
-hành vi khám phá phim trong flow external-booking thực tế.
+A multi-cinema discovery platform that aggregates movie schedules from
+Cinestar, Lotte Cinema, and Galaxy Cinema, resolves provider-specific records
+into a canonical catalogue, and recommends movies that still have relevant
+showtimes.
 
-🔗 **Demo trực tiếp:** [thêm link deploy ở đây]
+The primary product flow is **discovery and external booking**: users compare
+movies, cinemas, dates, and locations in one interface, then continue to the
+cinema's official booking page. The repository also contains an optional
+internal-booking subsystem used to demonstrate real-time seat holds and
+double-booking prevention.
 
----
+## Why this project exists
 
-## Vấn đề dự án giải quyết
+Cinema chains expose schedules through different web applications, identifiers,
+and response formats. The same movie may appear under several names and IDs,
+while users must repeatedly search across provider websites to compare
+showtimes.
 
-Khi nhiều người cùng cố đặt 1 ghế trong cùng 1 suất chiếu tại cùng thời điểm, hệ thống phải đảm bảo **chỉ đúng 1 người** đặt được ghế đó — không được để xảy ra tình trạng 2 người cùng "sở hữu" 1 ghế (double-booking), và người thua cuộc phải nhận được thông báo rõ ràng thay vì lỗi hệ thống mơ hồ.
+This project addresses that fragmentation with four stages:
 
-Đây là bài toán **race condition** kinh điển trong các hệ thống đặt chỗ thực tế (vé máy bay, vé concert, đặt phòng khách sạn).
+1. Collect provider-specific cinema and showtime data.
+2. Normalize it into a shared ingestion contract.
+3. Resolve duplicate provider movies into one canonical movie.
+4. Rank currently available movies using user behavior, semantic intent, and
+   cinema proximity.
 
-## Cách giải quyết — kiến trúc 2 lớp bảo vệ
+## System overview
 
-**Lớp 1 — Redis (giữ ghế tạm thời, TTL 5 phút)**
-Khi user chọn ghế, hệ thống giành 1 khóa nguyên tử trong Redis (`SET ... NX`) — đảm bảo chỉ 1 request thành công dù nhiều request đến cùng lúc. Khóa tự động hết hạn nếu không thanh toán kịp, không cần job dọn dẹp thủ công.
-
-**Lớp 2 — PostgreSQL `SELECT ... FOR UPDATE` (xác nhận cuối cùng)**
-Trước khi ghi booking thật vào database, dòng dữ liệu ghế được khóa độc quyền — loại bỏ hoàn toàn khoảng hở giữa "đọc trạng thái" và "ghi booking" từng gây ra bug double-booking.
-
-Kiến trúc này mô phỏng đúng cách các hệ thống đặt vé quy mô lớn (BookMyShow, Ticketmaster) xử lý bài toán tương tự: Redis lo tốc độ và trải nghiệm real-time, PostgreSQL đóng vai trò "nguồn sự thật" cuối cùng.
-
-**Đã kiểm chứng bằng script mô phỏng 20 request đồng thời tranh giành 1 ghế** — chỉ 1 request thành công, 19 request còn lại nhận lỗi rõ ràng (409), không có double-booking hay lỗi hệ thống nào xảy ra.
-
-## Các điểm kỹ thuật đáng chú ý khác
-
-- **Chống spam giữ ghế:** mỗi user chỉ được giữ tối đa 10 ghế
-  cho một suất, ràng buộc ở server
-- **Import dữ liệu thật từ TMDB:** phim, poster, mô tả, trailer YouTube — không dùng dữ liệu giả
-- **Gợi ý phim cá nhân hóa:** content-based filtering (TF-IDF +
-  cosine similarity) từ lượt xem phim, tìm kiếm, xem lịch chiếu, bấm sang
-  website rạp và booking nội bộ
-- **Xác thực an toàn:** JWT lưu trong HttpOnly cookie, mật khẩu hash bằng bcrypt, luồng quên/đặt lại mật khẩu qua email thật (SMTP)
-- **Toàn bộ hạ tầng chạy bằng Docker:** PostgreSQL, Redis, và ứng dụng — môi trường nhất quán, không phụ thuộc cấu hình máy cá nhân
-
-## Tech stack
-
-| Thành phần | Công nghệ |
-|---|---|
-| Backend | FastAPI (async), SQLAlchemy (async ORM) |
-| Database | PostgreSQL |
-| Cache / tạm thời | Redis |
-| Frontend | Jinja2 (server-side rendering) |
-| Gợi ý phim | scikit-learn (TF-IDF, cosine similarity) |
-| Dữ liệu phim | TMDB API |
-| Hạ tầng | Docker, Docker Compose |
-| Xác thực | JWT (HttpOnly cookie), bcrypt |
-
-## Vai trò Redis trong production
-
-Flow dữ liệu thật chỉ có `external_redirect`, nên app không khởi động
-seat-expiry listener hoặc expose WebSocket seat route theo mặc định. Redis
-thay vào đó nằm trực tiếp trong các flow production:
-
-- quota gợi ý theo user và IP, reset lúc 00:00 giờ Việt Nam;
-- cache prompt embedding theo hash/model với TTL, không lưu prompt thô trong key;
-- distributed lock ngăn hai job collector cùng nguồn chạy đè nhau;
-- reset-password token có TTL.
-
-```dotenv
-AI_REQUESTS_PER_USER_PER_DAY=20
-AI_REQUESTS_PER_IP_PER_DAY=100
-AI_PROMPT_CACHE_TTL_SECONDS=86400
-COLLECTOR_LOCK_TTL_SECONDS=3600
+```mermaid
+flowchart LR
+    A[Cinestar] --> D[Provider collectors]
+    B[Lotte Cinema] --> D
+    C[Galaxy Cinema] --> D
+    D --> E[Shared Pydantic DTOs]
+    E --> F[Idempotent sync service]
+    F --> G[(PostgreSQL)]
+    G --> H[Discovery API and Jinja UI]
+    H --> I[Behavior events]
+    H --> J[Natural-language preference]
+    I --> K[Hybrid recommendation]
+    J --> L[Gemini embeddings]
+    L --> K
+    G --> K
+    K --> M[Movie and nearest showtime]
+    M --> N[Official cinema booking page]
+    R[(Redis)] --> F
+    R --> K
 ```
 
-Khi cần demo race condition/seat hold, bật subsystem booking nội bộ:
+## Core capabilities
 
-```dotenv
-ENABLE_INTERNAL_BOOKING=true
-```
+### Multi-provider ingestion
 
-Test profile tự bật flag này. Production mặc định là `false`, nên không
-có background Redis keyspace listener chạy liên tục.
+Each cinema chain is implemented as a provider adapter behind a shared
+`CinemaCollector` interface:
 
-## Database migrations
+- **Cinestar** discovers public Next.js movie/cinema data and queries showtime
+  endpoints for a date range.
+- **Lotte Cinema** integrates with the site's ASP.NET RPC endpoints for cinema
+  details, movie dates, and play sequences.
+- **Galaxy Cinema** normalizes the schedule embedded in the public Next.js page;
+  its anti-bot layer may require an operator-supplied browser cookie.
 
-Schema được quản lý bằng Alembic; ứng dụng không còn gọi
-`Base.metadata.create_all()` khi khởi động.
+Live collectors fetch seven days by default and normalize their results into
+shared Pydantic DTOs before any database write. They include request throttling
+and retries for transient upstream failures.
 
-```bash
-docker compose run --rm app alembic upgrade head
-```
+### Idempotent synchronization and canonical movies
 
-Kiểm tra database đang ở revision nào và metadata ORM có lệch schema không:
+Provider records are identified by `(source, external_id)`, so rerunning a
+collector updates existing data instead of creating duplicate cinemas or
+showtimes. Every record is synchronized inside a database savepoint: one bad
+record is reported without rolling back the valid records in the batch.
 
-```bash
-docker compose run --rm app alembic current
-docker compose run --rm app alembic check
-```
+The catalogue separates:
 
-Migration đầu tiên tự nhận diện database trống hoặc schema legacy. Với dữ liệu
-legacy, migration tạo một cinema/phòng chuyển tiếp, gắn `room_id`, sinh
-`ShowtimeSeat`, sinh `BookingSeat`, rồi kiểm tra toàn vẹn trước khi commit.
+- `Movie`: the canonical movie shown to users;
+- `ProviderMovie`: the provider-specific ID and metadata;
+- `Showtime`: a schedule linked to both the canonical and provider movie.
 
-## Cinema data ingestion
+Existing provider mappings take priority. New records are matched using a
+normalized title and a duration tolerance, allowing one movie card to aggregate
+showtimes from multiple cinema chains while preserving source provenance.
 
-Pipeline collector chuẩn hóa dữ liệu nguồn thành DTO rồi đồng bộ idempotent vào
-Cinema, CinemaRoom, Movie, Showtime, Seat và ShowtimeSeat. Có thể thử pipeline
-không cần nguồn bên ngoài bằng fixture đi kèm:
+### Discovery and nearby cinemas
 
-```bash
-docker compose run --rm app \
-  python -m app.scripts.sync_cinema_data \
-  --source fixture \
-  --date 2026-08-20
-```
+The API and server-rendered UI support:
 
-Chạy lại cùng lệnh không tạo dữ liệu trùng nhờ identity `(source,
-external_id)` ở database. Mỗi record chạy trong savepoint riêng nên một record
-lỗi không rollback các record hợp lệ khác trong batch.
+- movie title, provider, city, and date filters;
+- upcoming-showtime filtering and pagination;
+- showtime aggregation across providers;
+- browser geolocation and radius filtering;
+- nearest-cinema ordering with Haversine distance;
+- external redirects to official booking pages.
 
-Mỗi lượt sync còn giành Redis distributed lock theo `source`. Nếu scheduler
-hoặc deploy vô tình kích hoạt hai job cùng lúc, job thứ hai trả
-`collector_already_running` thay vì crawl và ghi dữ liệu song song.
+Haversine distance is used because the product currently needs geographic
+proximity, not road routing or travel-time estimates. No Google Maps API is
+required for this flow.
 
-Pipeline hỗ trợ hai loại suất chiếu:
+### Behavior-based recommendation
 
-- `internal`: có phòng, giá và inventory ghế để đặt trực tiếp trong hệ thống.
-- `external_redirect`: có rạp và URL đặt vé bên ngoài; phòng/giá có thể thiếu và
-hệ thống không sinh inventory ghế.
+Authenticated users generate explicit discovery events such as:
 
-Đồng bộ dữ liệu lịch chiếu thật từ Cinestar. Ngày bắt đầu mặc định là hôm nay
-theo giờ Việt Nam và collector lấy hôm nay cùng 6 ngày kế tiếp trong một lượt:
+- `movie_viewed`
+- `movie_searched`
+- `showtimes_viewed`
+- `external_booking_clicked`
+- `preference_prompt_submitted`
+- `recommendation_clicked`
 
-```bash
-docker compose run --rm app \
-  python -m app.scripts.sync_cinema_data --source cinestar
-```
+Events are validated against catalogue entities and deduplicated within a
+two-minute window. Older signals decay with a 30-day half-life. An external
+booking click is intentionally stored as **intent**, not as a confirmed ticket
+purchase, because the transaction occurs on the provider's website.
 
-Collector tự đọc danh sách phim/rạp từ dữ liệu Next.js công khai, giới hạn
-tốc độ request, retry lỗi tạm thời và chỉ lưu suất chiếu dưới dạng
-`external_redirect`. Không cần nhập thủ công movie ID hoặc cinema ID.
+### Gemini-powered semantic recommendation
 
-Có thể thay đổi khoảng ngày (tối đa 31 ngày; nguồn chỉ trả những ngày thực sự
-có lịch):
+An authenticated user can describe a viewing preference in natural language,
+for example:
 
-```bash
-docker compose run --rm app \
-  python -m app.scripts.sync_cinema_data \
-  --source cinestar --date 2026-08-20 --days 7
-```
+> I want a light, funny family movie that is not too violent.
 
-Đồng bộ lịch Lotte Cinema. Collector tự tìm danh sách rạp toàn quốc, lấy địa
-chỉ/toạ độ và gọi RPC lịch chiếu cho từng rạp/ngày; mặc định cũng lấy 7 ngày:
+`POST /recommendations/natural-language` first limits candidates to movies with
+eligible showtimes. Gemini then embeds the prompt and canonical movie documents;
+the service compares them with cosine similarity and combines semantic relevance
+with behavioral and catalogue signals.
 
-```bash
-docker compose run --rm app \
-  python -m app.scripts.sync_cinema_data --source lotte
-```
-
-Lotte dùng ASP.NET RPC (`GetCinemaDetailItem`, `GetMoviePlayDates`,
-`GetPlaySequence`). Collector không lưu cookie trình duyệt và không cần
-Playwright; request được giới hạn tốc độ và retry khi gặp lỗi tạm thời.
-
-Đồng bộ lịch Galaxy Cinema. Galaxy nhúng danh sách rạp, phim và session nhiều
-ngày trong `__NEXT_DATA__` của trang lịch chiếu nên collector chỉ tải một trang
-rồi chuẩn hóa dữ liệu. Website có lớp chống bot; copy giá trị header `Cookie`
-từ request `/lich-chieu/` trong DevTools vào biến môi trường, không ghi cookie
-vào source code. Nếu Galaxy vẫn redirect, copy cả `User-Agent` của cùng request
-vào `GALAXY_USER_AGENT`:
-
-```bash
-docker compose run --rm \
-  -e GALAXY_COOKIE='muid_mly=...' \
-  -e GALAXY_USER_AGENT='Mozilla/5.0 ...' \
-  app python -m app.scripts.sync_cinema_data \
-  --source galaxy --date 2026-08-20 --days 7
-```
-
-Cookie Galaxy có thể hết hạn. Khi đó collector dừng với thông báo yêu cầu cập
-nhật `GALAXY_COOKIE`; dữ liệu đã đồng bộ trước đó không bị ảnh hưởng.
-
-Fixture hiện có cả hai loại để phát triển API/UI mà chưa cần crawler thật.
-
-Booking UI khôi phục các hold còn hạn sau khi refresh, dùng thời hạn sớm nhất
-của nhóm ghế làm countdown, overlay Redis hold lên inventory database và tự
-kết nối lại WebSocket với exponential backoff khi mạng gián đoạn.
-
-Đồng bộ bộ demo external showtime cho ba provider:
-
-```bash
-docker compose run --rm app \
-  python -m app.scripts.sync_cinema_data \
-  --source demo \
-  --date 2026-08-20
-```
-
-Có thể chạy riêng bằng `--source mock-cgv`, `mock-galaxy` hoặc
-`mock-cinestar`. Trong database, source tương ứng vẫn là `cgv`, `galaxy` và
-`cinestar`, giống collector thật sẽ dùng sau này.
-
-## Canonical movie và chống trùng phim
-
-`movies` chứa một bản ghi chuẩn cho mỗi phim. ID riêng của từng nguồn được lưu
-trong `provider_movies`, còn `showtimes.movie_id` luôn trỏ về phim chuẩn. Ingestion
-resolver ưu tiên mapping `(source, external_id)` đã có; với phim mới, resolver
-so khớp tên đã bỏ dấu/hậu tố phân loại (`T13`, `T16`, `LT`, `Rerun`) cùng thời
-lượng sai lệch tối đa 10 phút. Vì vậy một poster có thể tổng hợp lịch của
-Cinestar, Galaxy và Lotte mà vẫn giữ đầy đủ provenance của từng nguồn.
-
-## Discovery API
-
-Các endpoint đọc hỗ trợ filter và pagination để dùng trực tiếp cho UI:
+Without location:
 
 ```text
-GET /movies?title=conan&source=cgv&available_only=true&skip=0&limit=20
-GET /showtimes?source=cgv&city=Hồ Chí Minh&date=2026-08-20&limit=50
-GET /movies/{id}/showtimes?city=Hồ Chí Minh&date=2026-08-20
-GET /cinemas?latitude=10.778&longitude=106.702&radius_km=10
+semantic 60% + behavior 25% + showtime popularity 10% + rating 5%
 ```
 
-Danh sách showtime và aggregation mặc định chỉ trả suất chưa bắt đầu; gửi
-`upcoming_only=false` khi cần xem dữ liệu lịch sử. Khi có tọa độ, cinema được
-sắp theo khoảng cách và response có thêm `distance_km`.
-
-## Behavior tracking và recommendation
-
-UI gửi event cho user đã đăng nhập khi họ xem phim, tìm kiếm, xem lịch
-chiếu hoặc bấm nút đặt vé bên website rạp. API ghi nhận qua
-`POST /events`, tự suy ra phim/rạp/nguồn từ `showtime_id` và gộp event
-trùng trong cửa sổ hai phút.
-
-`GET /recommendations/me` tạo content profile theo trọng số:
-
-```text
-movie_viewed=1, movie_searched=2, showtimes_viewed=3,
-external_booking_clicked=7, internal_booking_confirmed=10
-```
-
-Tín hiệu cũ giảm một nửa sau mỗi 30 ngày; chỉ các phim còn suất
-tương lai được đề xuất. User chưa có hành vi nhận danh sách trending
-theo số suất sắp chiếu và rating. Lượt bấm sang rạp chỉ là tín hiệu
-ý định, không được ghi nhận là một giao dịch đã hoàn tất.
-
-### Gợi ý bằng ngôn ngữ tự nhiên
-
-User đã đăng nhập có thể mô tả bộ phim họ muốn xem ngay trên trang
-chủ. `POST /recommendations/natural-language` xếp hạng các phim còn
-suất theo công thức hybrid:
-
-```text
-semantic similarity 60% + behavior 25% + showtime popularity 10% + rating 5%
-```
-
-Request có thể gửi thêm `latitude`, `longitude` và `radius_km`. Khi có
-vị trí, backend loại rạp ngoài bán kính, tính Haversine từ user tới rạp,
-chọn rạp gần nhất có suất cho từng phim và đổi trọng số thành:
+With location:
 
 ```text
 semantic 55% + behavior 20% + proximity 15% + popularity 5% + rating 5%
 ```
 
-Response trả `nearest_showtime` gồm giờ chiếu, tên/địa chỉ rạp,
-khoảng cách và booking URL thật. UI dùng Browser Geolocation nên không
-cần Google Maps khi trình duyệt đã cung cấp tọa độ. Rạp thiếu tọa độ
-không được đoán khoảng cách và sẽ bị bỏ qua trong chế độ nearby.
-Tọa độ user không được lưu trong behavior event.
+Movie embeddings are cached in PostgreSQL by model and content hash. Prompt
+embeddings are cached in Redis by a hash of the normalized prompt, so repeated
+requests do not expose raw prompts in Redis keys. If Gemini is not configured or
+temporarily fails, the recommender falls back to local word/character TF-IDF.
 
-Khi cấu hình Gemini API, vector của canonical movie được cache trong
-`movie_embeddings` theo hash nội dung và model. Phim không thay đổi không bị
-embed lại; mỗi prompt bình thường chỉ tốn một query embedding. Tạo API key tại
-Google AI Studio rồi cấu hình trong `.env`:
+### Redis in the primary workflow
+
+Redis is used for production-facing concerns rather than as a decorative
+dependency:
+
+- atomic daily AI quotas per authenticated user and hashed IP;
+- prompt-embedding cache with TTL;
+- token-owned distributed locks for scheduled collectors;
+- expiring password-reset tokens.
+
+The quota and lock operations use Lua scripts where multiple Redis commands must
+behave atomically. If Gemini is configured and Redis is unavailable, the
+recommendation endpoint fails closed to protect API cost.
+
+### Optional internal-booking concurrency lab
+
+Real provider showtimes use `external_redirect`; this application cannot know
+their live seat inventory or confirm purchases without private booking APIs.
+
+For concurrency testing, `ENABLE_INTERNAL_BOOKING=true` activates a separate
+internal flow with:
+
+- Redis `SET NX EX` seat holds with a five-minute TTL;
+- a maximum of ten held seats per user and showtime;
+- WebSocket seat-state broadcasts and reconnecting clients;
+- PostgreSQL `SELECT ... FOR UPDATE` during booking confirmation;
+- database constraints as the final consistency boundary.
+
+Redis coordinates temporary state and real-time feedback; PostgreSQL remains the
+source of truth for confirmed bookings.
+
+## Technology stack
+
+| Area | Technology |
+|---|---|
+| Backend | Python 3.12, FastAPI, async SQLAlchemy, Pydantic |
+| Database | PostgreSQL, Alembic |
+| Cache and coordination | Redis, Lua scripts |
+| Recommendation | Gemini Embedding 2, scikit-learn TF-IDF, cosine similarity |
+| Frontend | Jinja2, HTML, CSS, browser Geolocation API, WebSockets |
+| Data collection | HTTPX, provider adapters, public web data |
+| Authentication | JWT in HttpOnly cookies, bcrypt |
+| Infrastructure | Docker, Docker Compose |
+| Testing | pytest, pytest-asyncio, isolated PostgreSQL and Redis services |
+
+## Data model
+
+```text
+User 1 ── N UserEvent
+User 1 ── N Booking
+
+Movie 1 ── N ProviderMovie
+Movie 1 ── N Showtime
+Cinema 1 ── N CinemaRoom
+Cinema 1 ── N Showtime
+CinemaRoom 1 ── N Seat
+
+Showtime N ── N Seat          through ShowtimeSeat
+Booking  N ── N ShowtimeSeat  through BookingSeat
+```
+
+## Getting started
+
+### Prerequisites
+
+- Docker Engine
+- Docker Compose v2
+- A Gemini API key only if semantic embeddings are required; local TF-IDF works
+  without one
+
+### 1. Configure the environment
+
+```bash
+cp .env.example .env
+```
+
+Generate a development JWT secret and place it in `SECRET_KEY`:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Optional Gemini configuration:
 
 ```dotenv
 GEMINI_API_KEY=your-google-ai-studio-api-key
@@ -273,46 +234,170 @@ GEMINI_EMBEDDING_MODEL=gemini-embedding-2
 GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 ```
 
-Query embedding của prompt được cache trong Redis 24 giờ theo mặc định.
-Prompt lặp lại với cùng model không gọi provider lần nữa. API trả thêm
-`quota_remaining` và phản hồi `429` kèm `Retry-After` khi hết quota.
+Never commit `.env`; it is intentionally excluded by `.gitignore`.
 
-Nếu API key chưa được cấu hình hoặc Gemini tạm lỗi, service
-fallback sang word/character TF-IDF cục bộ và response ghi rõ
-`engine=local_tfidf_fallback`. Mỗi response có `context_id`; event
-`preference_prompt_submitted` và `recommendation_clicked` dùng ID này để
-đo click-through rate theo từng lần gợi ý. Prompt được lưu cho user đã
-đăng nhập để phân tích chất lượng recommendation.
+### 2. Start the application
 
-## Automated tests
+```bash
+docker compose up --build
+```
 
-Test suite dùng PostgreSQL và Redis riêng, không đọc hoặc xóa dữ liệu development.
-Lệnh dưới đây tự chạy Alembic trên database test trước khi chạy pytest:
+The development compose command applies Alembic migrations before starting
+Uvicorn.
+
+- Application: <http://localhost:8001>
+- OpenAPI documentation: <http://localhost:8001/docs>
+- Health check: <http://localhost:8001/health>
+
+### 3. Load sample data
+
+The fixture collector exercises the same DTO and synchronization pipeline
+without depending on an external website:
+
+```bash
+docker compose run --rm app \
+  python -m app.scripts.sync_cinema_data --source fixture
+```
+
+### 4. Run live collectors
+
+```bash
+docker compose run --rm app \
+  python -m app.scripts.sync_cinema_data --source cinestar
+
+docker compose run --rm app \
+  python -m app.scripts.sync_cinema_data --source lotte
+
+docker compose run --rm app \
+  python -m app.scripts.sync_cinema_data --source galaxy
+```
+
+Override the starting date and range when necessary. Live collectors support
+between 1 and 31 days:
+
+```bash
+docker compose run --rm app \
+  python -m app.scripts.sync_cinema_data \
+  --source cinestar --date 2026-08-21 --days 7
+```
+
+Galaxy may require browser-derived values from a current `/lich-chieu/`
+request. Keep these values in environment variables, never in source control:
+
+```bash
+docker compose run --rm \
+  -e GALAXY_COOKIE='muid_mly=...' \
+  -e GALAXY_USER_AGENT='Mozilla/5.0 ...' \
+  app python -m app.scripts.sync_cinema_data \
+  --source galaxy --days 7
+```
+
+Upstream websites can change without notice. These collectors use public-facing
+data for an educational portfolio project and should be run at a respectful
+frequency and in accordance with the applicable site terms.
+
+## Database migrations
+
+Alembic owns the database schema; application startup does not call
+`Base.metadata.create_all()`.
+
+```bash
+docker compose run --rm app alembic upgrade head
+docker compose run --rm app alembic current
+docker compose run --rm app alembic check
+```
+
+The migration chain supports both an empty database and the repository's legacy
+booking schema, including data backfills and integrity checks.
+
+## API examples
+
+```text
+GET  /movies?title=conan&source=cinestar&available_only=true&skip=0&limit=20
+GET  /showtimes?source=lotte&city=H%E1%BB%93%20Ch%C3%AD%20Minh&date=2026-08-21
+GET  /movies/{movie_id}/showtimes?city=H%E1%BB%93%20Ch%C3%AD%20Minh&date=2026-08-21
+GET  /cinemas?latitude=10.778&longitude=106.702&radius_km=10
+POST /events
+GET  /recommendations/me
+POST /recommendations/natural-language
+```
+
+Interactive request and response schemas are available through `/docs`.
+
+## Testing
+
+The test profile uses isolated PostgreSQL and Redis services and applies all
+migrations before pytest starts. It never truncates the development database.
 
 ```bash
 docker compose --profile test run --rm --build test
 ```
 
-Sau lần build đầu tiên, có thể bỏ `--build` để chạy nhanh hơn:
+After the first image build:
 
 ```bash
 docker compose --profile test run --rm test
 ```
 
-Các nhóm được kiểm tra gồm health/UI smoke test, discovery API, canonical movie
-đa nguồn, authentication, behavior event/deduplication, semantic fallback,
-embedding cache, location/radius filtering, nearest showtime, hybrid
-recommendation, Redis AI quota, distributed lock, seat hold, booking inventory
-và hai user tranh chấp cùng một ghế.
+The suite currently contains 37 tests covering:
 
-## Cấu trúc project
+- authentication and application smoke tests;
+- Cinestar, Lotte, and Galaxy collector contracts;
+- idempotent synchronization and canonical movie resolution;
+- discovery filters and nearby-cinema calculations;
+- event validation and deduplication;
+- Gemini request contracts, embedding caches, TF-IDF fallback, and AI quotas;
+- distributed collector locks;
+- seat holds, inventory consistency, and competing booking requests.
 
-app/
-├── main.py # Entry point
-├── core/ # Config, kết nối DB/Redis, bảo mật
-├── models/ # SQLAlchemy models
-├── schemas/ # Pydantic schemas
-├── routes/ # API endpoints
-├── services/ # Logic nghiệp vụ (TMDB, recommendation, email)
-├── templates/ # Giao diện Jinja2
-└── static/ # CSS/JS
+## Project structure
+
+```text
+.
+├── alembic/                  # Schema migrations and legacy data backfills
+├── app/
+│   ├── collectors/           # Provider adapters and shared ingestion DTOs
+│   ├── core/                 # Configuration, database, Redis, security
+│   ├── fixtures/             # Offline ingestion fixtures
+│   ├── models/               # SQLAlchemy models
+│   ├── routes/               # HTTP and WebSocket endpoints
+│   ├── schemas/              # API request/response schemas
+│   ├── scripts/              # Collector and concurrency entry points
+│   ├── services/             # Sync, discovery, recommendation, email
+│   ├── static/               # CSS and client-side behavior
+│   ├── templates/            # Jinja2 pages
+│   └── main.py               # FastAPI application
+├── tests/                    # Integration and unit tests
+├── docker-compose.yml
+└── Dockerfile
+```
+
+## Current boundaries
+
+- Cinestar, Lotte, and Galaxy are unofficial integrations built from
+  public-facing website behavior, not stable partner APIs.
+- External providers do not expose live seat inventory or purchase confirmation
+  to this project; provider clicks are behavioral intent signals only.
+- Nearby ranking uses straight-line distance rather than road distance.
+- Embeddings are stored as JSON vectors and scored in application memory, which
+  is appropriate for this catalogue size but should move to `pgvector` or a
+  vector database at larger scale.
+- The optional internal-booking subsystem is a concurrency demonstration and is
+  disabled by default in the external-data workflow.
+
+## Potential next steps
+
+- Deploy the web service, PostgreSQL, Redis, and a scheduled collector job.
+- Add collector observability, freshness metrics, and upstream contract alerts.
+- Introduce `pgvector` and approximate nearest-neighbor search as the catalogue
+  grows.
+- Add recommendation evaluation metrics such as click-through rate by context.
+- Add a new provider without changing the shared synchronization or discovery
+  layers.
+
+## License and data notice
+
+This repository is an educational portfolio project. Movie metadata, cinema
+names, schedules, posters, and trademarks remain the property of their
+respective owners. Do not use the collectors in ways that violate provider
+terms, access controls, or applicable law.
